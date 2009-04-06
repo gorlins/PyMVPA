@@ -214,6 +214,60 @@ class ChannelDataset(MappedDataset):
                                       copy_data=True,
                                       copy_dsattr=False)
 
+    def getTime(self):
+        """Returns the time vector for all samples"""
+        return N.arange(self.t0, self.t0+self.O.shape[2]*self.dt, self.dt)
+    def selectChannels(self, *channels):
+        """Returns a new dataset composed of the requested channels
+        
+        :parameters:
+        
+          *channels: list of ids (or names matched to self.channelids) to include
+            in the returned data set
+            
+        :Return:
+          ChannelDataset
+        """
+        ids = [i for i,iname in enumerate(self.channelids)
+               if i in channels or iname in channels]
+        newchans = [self.channelids[i] for i in ids]
+        import copy
+        newdata = copy.copy(self._data)
+        newdata['samples'] = samples=self.O.take(ids,axis=1)
+        return ChannelDataset(dsattr=self._dsattr, 
+                              channelids=newchans,
+                              **newdata)
+    
+    def lowpass(self, std):
+        """Lowpass (Gaussian) filters the samples 
+        
+        :Parameters:
+          std: standard deviation in terms of the bin (dt) size
+          
+        :Returns:
+          self (operates in place on samples)
+        """
+        #ChannelDataset.resample was causing me issues with directly smoothing
+        #the data with a Gaussian, so this is an alternate version
+        
+        if std:
+            
+            externals.exists("scipy", raiseException=True)
+            
+            # since resample creates a gaussian in FFT domain, we must convert the std
+            #self.resample(window=('gauss',1./(2*pi*std)), dt=self.dt, inplace=True)
+            g = sigal.gaussian(self.ntimepoints, std)
+            gf = sigal.fft(sigal.ifftshift(g/g.sum()))
+            
+            self.samples = self.mapForward(sigal.ifft(sigal.fft(self.O, axis=2)*gf,axis=2)).real
+            self._dsattr['smoothedStd'] = std
+            return self
+           
+    nchannels = property(fget=lambda self: self.O.shape[1],
+                         doc='Number of channels')
+    ntimepoints = property(fget=lambda self: self.O.shape[2],
+                           doc='Number of time samples')
+    
     channelids = property(fget=lambda self: self._dsattr['ch_ids'],
                           doc='List of channel IDs')
     t0 = property(fget=lambda self: self._dsattr['ch_t0'],
