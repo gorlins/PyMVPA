@@ -28,7 +28,14 @@ def __version_to_tuple(v):
     Tuple of integers constructed by splitting at '.'.
     """
     if isinstance(v, basestring):
-        v = tuple([int(x) for x in v.split('.')])
+        def sToi(s):
+            try:
+                return int(s)
+            except ValueError, v: # Developement versions raise errors!!
+                if s == 'dev':
+                    return -1
+                raise ValueError('%s is not a valid version component'%s)
+        v = tuple([sToi(x) for x in v.split('.')])
     elif isinstance(v, tuple) or isinstance(v, list):
         # assure tuple
         v = tuple(v)
