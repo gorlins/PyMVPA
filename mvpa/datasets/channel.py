@@ -231,10 +231,9 @@ class ChannelDataset(MappedDataset):
         ids = [i for i,iname in enumerate(self.channelids)
                if i in channels or iname in channels]
         newchans = [self.channelids[i] for i in ids]
-        import copy
         newdata = copy.copy(self._data)
-        newdata['samples'] = samples=self.O.take(ids,axis=1)
-        return ChannelDataset(dsattr=self._dsattr, 
+        newdata['samples'] = self.O.take(ids,axis=1)
+        return ChannelDataset(dsattr=copy.copy(self._dsattr), 
                               channelids=newchans,
                               **newdata)
     
@@ -248,7 +247,8 @@ class ChannelDataset(MappedDataset):
           self (operates in place on samples)
         """
         #ChannelDataset.resample was causing me issues with directly smoothing
-        #the data with a Gaussian, so this is an alternate version
+        #the data with a Gaussian, since the std argument is *in FFT space* and
+        #it wasn't clear that it was normalizing properly
         
         if std:
             
@@ -256,10 +256,13 @@ class ChannelDataset(MappedDataset):
             
             # since resample creates a gaussian in FFT domain, we must convert the std
             #self.resample(window=('gauss',1./(2*pi*std)), dt=self.dt, inplace=True)
-            g = sigal.gaussian(self.ntimepoints, std)
-            gf = sigal.fft(sigal.ifftshift(g/g.sum()))
             
-            self.samples = self.mapForward(sigal.ifft(sigal.fft(self.O, axis=2)*gf,axis=2)).real
+            # FFT method
+            g = signal.gaussian(self.ntimepoints, std)
+            gf = signal.fft(signal.ifftshift(g/g.sum()))
+            self.samples = self.mapForward(signal.ifft(
+                    signal.fft(self.O, axis=2)*gf,axis=2).real)
+                    
             self._dsattr['smoothedStd'] = std
             return self
            
