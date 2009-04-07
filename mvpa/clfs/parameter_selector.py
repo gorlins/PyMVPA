@@ -7,16 +7,29 @@ A great deal of work is needed to make it optimal for retrainable classifiers,
 but currently, it should work for any cross-foldable dataset and classifier
 (albeit slowly, though not unreasonably so)
 
+Though functional, this code was written while I was first learning python,
+so there are certainly areas that need cleaning up and/or rethinking.
+Todo: rewrite on scipy.optimize backend, use ParameterSelection as an abstract
+class and write inheritors implementing different optimization solvers.
+
+Also plotting is slow and messy - cleanup!!
+
 Probably should be reconciled with model_selector somehow...
+
+work in progress
 """
 import copy
 import numpy as N
-from mvpa.base import externals
 from time import time
+from mvpa.base import externals
 externals.exists("scipy", raiseException=True)
+
 from scipy.ndimage import gaussian_filter
 from mvpa.clfs.transerror import TransferError
 from mvpa.algorithms.cvtranserror import CrossValidatedTransferError
+
+#from scipy.optimize import brute, fmin
+
 class ParameterSelection(object):
     """Runs a grid search algorithm on a classifier and dataset"""
     def configureSubplots(self, nrows, ncols):
@@ -80,6 +93,7 @@ class ParameterSelection(object):
         """
         if te is None:
             te = TransferError(classifier)
+        
         if cv is None:
             cv = CrossValidatedTransferError(te, splitter)
 
@@ -219,6 +233,8 @@ class ParameterSelection(object):
             counter=0
             pylab.draw()
      
+
+        # Runs the optimization
         err = N.zeros(tuple([len(s) for s in scales.itervalues()]))
         for i in range(self._iter):
             # Build grids
@@ -357,7 +373,7 @@ def _grid(argtup):
 if __name__ == '__main__':
     from mvpa.clfs.svm import RbfCSVMC
     from mvpa.misc.data_generators import dumbFeatureBinaryDataset
-    from mvpa.datasets.splitter import NFoldSplitter
+    from mvpa.datasets.splitters import NFoldSplitter
     import pylab
     pylab.ion()
     clf = RbfCSVMC()
@@ -365,6 +381,6 @@ if __name__ == '__main__':
     
     psel = ParameterSelection(clf, ('C', 'gamma'), NFoldSplitter())
     psel(dset)
-    
+    print 'Parameter selection took %i seconds'%psel.time
     pylab.show()
     pass
