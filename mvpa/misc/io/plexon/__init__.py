@@ -59,6 +59,19 @@ class Plexon(object):
         self.spikes={}
         if filename:
             self.read(filename, **readargs)
+    def _convertVoltage(self, chan, x):
+        """Converts recordings to volts (channel and fileversion dependent"""
+        allgains={}
+        for c in self.ChanHeader.values():
+            allgains[c.Channel] = c.Gain
+        cgain=allgains[chan]
+        if self.FileHeader.Version >= 105:
+            return 2.*x*self.FileHeader.SpikeMaxMagnitudeMV/((2.**self.FileHeader.BitsPerSpikeSample)*cgain*self.FileHeader.SpikePreAmpGain)
+        elif self.FileHeader.Version >= 103:
+            return 2.*x*self.FileHeader.SpikeMaxMagnitudeMV/((2.**self.FileHeader.BitsPerSpikeSample)*cgain*1000.)
+        else:
+            return x*3000./(2048.*cgain*1000.)
+    
     def read(self, filename, onlyReadHeader=False, readWaves=False, readContinuous=False):
         """Reads all the good stuff from a plx file
         
@@ -93,22 +106,12 @@ class Plexon(object):
                 for i in range(c.NUnits):
                     self.spikes[c.Channel][i] = []
                     self.waves[c.Channel][i] = []
-            
-            cgain = {}
+        
             for c in self.ChanHeader:
-                cgain[c.Channel] = c.Gain
                 self.spikes[c.Channel]={}
             for c in self.SlowChannelHeader:
                 self.continuousAD[c.Channel]=[]
-            if self.FileHeader.Version >= 105:
-                def vConv(x,c):
-                    return 2.*x*self.FileHeader.SpikeMaxMagnitudeMV/((2.**self.FileHeader.BitsPerSpikeSample)*cgain[c]*self.FileHeader.SpikePreAmpGain)
-            elif self.FileHeader.Version >= 103:
-                def vConv(x,c):
-                    return 2.*x*self.FileHeader.SpikeMaxMagnitudeMV/((2.**self.FileHeader.BitsPerSpikeSample)*cgain[c]*1000.)
-            else:
-                def vConv(x,c):
-                    return x*3000./(2048.*cgain[c]*1000.)
+            
             # Read
             self.__hdr=header.PL_DataBlockHeader()
             self.__readContinuous = readContinuous
