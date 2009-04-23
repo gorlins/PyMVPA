@@ -39,7 +39,8 @@ class ParameterSelection(object):
         self._n=0
     def __init__(self, classifier, params, splitter, scales = None, defaults=None, 
                  cv=None, te=None,
-                 log=True, factors = 2., iterations=2, plot=True, nrows=1, ncols=1):
+                 log=True, factors = 2., iterations=2, plot=True, nrows=1, ncols=1, 
+                 manipulateClassifier=False):
         """Inits a ParameterSelector to do grid evaluation on a data cross-fold
         to find the best classifier parameters
         
@@ -90,6 +91,9 @@ class ParameterSelection(object):
           
           cv: CrossValidatedTransferError instance (created automatically if None)
           te: TransferError instance (created automatically if None)
+          
+          maninpulateClassifier: if True, alters the classifier's train method
+          to automatically select the parameters.  Uses module function makePsel
         """
         if te is None:
             te = TransferError(classifier)
@@ -148,6 +152,8 @@ class ParameterSelection(object):
                 self._log[param]=log[i]
             else:
                 self._log[param]=log
+        if manipulateClassifier:
+            makePsel(classifier, self)
     def __call__(self, dset, title=''):
         self.select(dset, title=title)
     def select(self, dset, title=''):
@@ -370,17 +376,42 @@ def _grid(argtup):
     tup += ')'
     return eval('['+tup+gen+']')
     
+def makePsel(clf, psel):
+    """Helper function modifies an existing classifier to automatically run
+    parameter selection every time it's trained
+    
+    WIP
+    """
+    clf._psel=psel
+    clf._rawtrain = clf.train
+    clf.__selecting = False
+    def train(self, dataset, *args, **kwargs):
+        """Runs parameter selection, then trains the classifier as normal"""
+        if not self.__selecting:
+            self.__selecting=True # Prevents recursive calls!!
+            self._psel(dataset)
+            self.__selecting=False
+        return self._rawtrain(dataset, *args, **kwargs)
+    clf.train=clf._train.__class__(train, clf)
+    def selection_summary(self):
+        """Returns a string summarizing the last selection step"""
+        s = '    --  parameter selection: %d%% to %d%% in %d seconds' %(100*(1.-self._psel.worst),
+                                                                        100*(1-self._psel.best),
+                                                                        self._psel.time)
+        return s
+    clf.selection_summary=clf._train.__class__(selection_summary, clf)
+    
 if __name__ == '__main__':
     from mvpa.clfs.svm import RbfCSVMC
-    from mvpa.misc.data_generators import dumbFeatureBinaryDataset
+    from mvpa.misc.data_generators import normalFeatureDataset
     from mvpa.datasets.splitters import NFoldSplitter
     import pylab
-    pylab.ion()
-    clf = RbfCSVMC()
-    dset = dumbFeatureBinaryDataset()
     
-    psel = ParameterSelection(clf, ('C', 'gamma'), NFoldSplitter())
-    psel(dset)
-    print 'Parameter selection took %i seconds'%psel.time
+    clf = RbfCSVMC()
+    dset = normalFeatureDataset(nfeatures=2, means=[[0,1], [1,0]])
+    
+    psel = ParameterSelection(clf, ('C', 'gamma'), NFoldSplitter(), manipulateClassifier=True)
+    clf.train(dset)
+    print clf.selection_summary()
     pylab.show()
     pass
