@@ -9,20 +9,24 @@ WIP
 """
 
 import numpy as N
+from mvpa.datasets import Dataset
 from mvpa.clfs.sg.svm import SVM, _tosg, _setdebug
 from shogun.Kernel import CustomKernel
 from shogun.Features import Labels
 import operator
 
 class CachedSVM(SVM):
-    """A classifier which can cache the kernel matrix to enable fast
-    cross-validation
+    """A classifier which can cache the kernel matrix to enable fast training,
+    retraining, cross-validation, etc
     
     Inits like a normal shogun SVM, so you can use any normal kernel or
     implementation.
     
     However, it takes a special dataset that is created with self.cache(dset)
     
+    Beware using default (kernel) parameters, like C=0, because when the Classifier
+    calls _getDefault(Something) it may send the cached index instead of the 
+    real data!!
     """
     def __init__(self, *args, **kwargs):
         SVM.__init__(self, *args, **kwargs)
@@ -32,13 +36,45 @@ class CachedSVM(SVM):
             assert True
         except AssertionError:
             raise RuntimeError('Cached classifier running on non-cached data')
-    def __getCachedMatrix(self, samples, s2=None):
-        self.assertCachedData(samples)
-        if s2 is None:
-            s2 = samples
-        else:
-            self.assertCachedData(s2)
-        return self.__cached_kernel.take(samples.ravel(), axis=0).take(s2.ravel(), axis=1)
+    def __cacheLHS(self, lhs):
+        """Grabs lhs from the kernel matrix and caches it"""
+        self.__cached_lhs = self.__cached_kernel.take(lhs.ravel(), axis=0)
+        
+    def __getCachedRHS(self, rhs):
+        """Similar to __getChachedMatrix, but leaves the LHS intact (maybe
+        faster for predicting, though untested)
+        """
+        return self.__cached_lhs.take(rhs.ravel(), axis=1)
+    def __getCachedMatrix(self, lhs,rhs=None):
+        """Creates a full kernel matrix from the cached data
+        
+        lhs, rhs must be (Nx1) samples representing cached data via indeces
+        If not specified, rhs=lhs (square kernel matrix)
+        """
+        if rhs is None:
+            rhs = lhs
+        return self.__cached_kernel.take(lhs.ravel(), axis=0).take(rhs.ravel(), axis=1)
+    def cacheMultiple(self, *dsets):
+        """Caches multiple datasets simultaneously, returning a list with cached
+        items corresponding to the inputs"""
+        def asdata(d):
+            if isinstance(d, Dataset):
+                return d.samples, d.nfeatures
+            return d, d.shape[0]
+        def ascache(c, d):
+            if isinstance(d, Dataset):
+                dout = d.selectFeatures([0])
+                dout.setSamplesDType(int)
+                dout.samples = N.arange(dout.nsamples).reshape((dout.nsamples, 1))
+            else:
+                dout=N.arange(d.shape[0]).reshape((d.shape[0], 1))
+            return dout
+        alld = map(asdata, dsets)
+        pured = [d[0] for d in alld]
+        puren = N.asarray([d[1] for d in alld])
+        allc = self.cache(N.concatenate(pured))
+        return map(ascache, N.split(allc, puren.cumsum()[:-1]), dsets)
+        
     def cache(self, dset):
         """Generates a kernel for the dataset
 
@@ -49,11 +85,13 @@ class CachedSVM(SVM):
         if isinstance(dset, N.ndarray):
             samples=dset
             dout = N.arange(samples.shape[0]).reshape((samples.shape[0], 1))
-        else:
+        elif isinstance(dset, Dataset):
             samples=dset.samples
             dout = dset.selectFeatures([0])
             dout.setSamplesDType(int)
             dout.samples = N.arange(dout.nsamples).reshape((dout.nsamples, 1))
+        else:
+            raise RuntimeError('Unknown datatype of class %s'%dset.__class__)
             
         # Init kernel
         kargs = []
@@ -61,16 +99,17 @@ class CachedSVM(SVM):
             value = self.kernel_params[arg].value
             # XXX Unify damn automagic gamma value
             if arg == 'gamma' and value == 0.0:
-                value = self._getDefaultGamma(dataset)
+                value = self._getDefaultGamma(dset)
             kargs += [value]
             
-        self.__traindata = _tosg(dset.samples)
-        self.__cached_kernel = self._kernel_type(self.__traindata, self.__traindata,
-                                                 *kargs).get_kernel_matrix()
+        sgdata = _tosg(samples)
+        self.__cached_kernel = self._kernel_type(sgdata, sgdata, *kargs).get_kernel_matrix()
         return dout
     def _train(self, dataset):
+        self.assertCachedData(dataset.samples)
         # Sets kernel with cached
         self.__kernel.set_full_kernel_matrix_from_full(self.__getCachedMatrix(dataset.samples))
+        self.__cacheLHS(dataset.samples)
         
         ul=None
         if 'regression' in self._clf_internals:
@@ -159,7 +198,8 @@ class CachedSVM(SVM):
                 predictions=trained_labels)
     
     def _predict(self, samples):
-        self.__kernel.set_full_kernel_matrix_from_full(self.__getCachedMatrix(self._trained_dataset.samples, samples))
+        self.assertCachedData(samples)
+        self.__kernel.set_full_kernel_matrix_from_full(self.__getCachedRHS(samples))
         self._SVM__condition_kernel(self.__kernel)
         self.__svm.set_kernel(self.__kernel)
         values_ = self.__svm.classify()
@@ -194,7 +234,70 @@ class CachedSVM(SVM):
         return predictions
 
 
+class CachedRbfSVM(CachedSVM):
+    """A cached SVM with an Rbf kernel
+    
+    Automagically updates the kernel when gamma is changed, avoiding the need
+    to recalculate it
+    
+    One difference between this and normal SVM is gamma cannot be 0 (to
+    automagically set default gamma) due to api complications. 
+    You may still call getDefaultGamma instead.
 
+    The actual kernel used is a cached linear kernel, so don't expect it to
+    have an identical interface to a normal RbfSVM.  This is done so that 
+    changing gamma only involves converting the linear kernel to a distance,
+    dividing by gamma, and doing the exponent - no new dot product is needed.
+    
+    Due to the implementation, the lhs is not updated automatically when gamma
+    changes.  The lhs is extracted from the full matrix during training, so
+    it is okay that it is not explicitly updated with the full matrix, since 
+    you should retrain if you change gamma anyway.  Perhaps there's a way to do
+    that caching as a view instead of copy, but I haven't done that yet.
+    
+    NB: The kernel matrix is stored twice (once for the linear distance, once
+    for the Rbf), so beware with huge sample sizes.
+    """
+    def __init__(self, kernel_type='rbf', **kwargs):
+        if not kernel_type == 'rbf':
+            raise RuntimeError('CachedRbfSVM must have kernel type ''rbf'', not ''%s'''%kernel_type)
+        CachedSVM.__init__(self, kernel_type='linear', **kwargs)
+        self.gamma=1.
+    def cache(self, d):
+        dout = CachedSVM.cache(self, d)
+        self.__linear = self.__linearToDist(self._CachedSVM__cached_kernel)
+        self.__updateCache()
+        return dout
+    def __updateCache(self):
+        """Creates the Rbf kernel from the linear distance"""
+        try:
+            self._CachedSVM__cached_kernel = self.__distToRbf(self.__linear, self.gamma)
+        except AttributeError: # in case kernel not calculated yet
+            pass
+        
+    @staticmethod
+    def __linearToDist(k):
+        """Convert a dot product kernel matrix to squared Euclidean distance"""
+        return N.diag(k).reshape((1, k.shape[1])) - 2*k+ N.diag(k).reshape((k.shape[0], 1))
+    
+    @staticmethod
+    def __distToRbf(k, g):
+        return N.exp(-k/g)
+        
+    def __setattr__(self, attr, value):
+        """Automagically adjust kernel for new value of gamma, otherwise set normally"""
+        CachedSVM.__setattr__(self, attr, value)
+        if attr=='gamma':
+            self.__updateCache()
+            
+    def _getDefaultGamma(self, dataset):
+        
+        # Have to override default which checks for known parameters.  maybe unify api at some point in future
+        value = 1.0 / len(dataset.uniquelabels)
+        if __debug__:
+            #debug("SVM", "Default Gamma is computed to be %f" % value) # have to find this module and import it
+            pass
+        return value
 
 
 #from shogun.Features import RealFeatures, Labels
@@ -203,35 +306,48 @@ class CachedSVM(SVM):
 
 #from mvpa.clfs.sg.svm import _tosg, SVM
 if __name__ == '__main__':
-    from mvpa.misc.data_generators import dumbFeatureBinaryDataset, normalFeatureDataset
+    from mvpa.misc.data_generators import normalFeatureDataset
     from mvpa.datasets.splitters import NFoldSplitter
     from mvpa.algorithms.cvtranserror import CrossValidatedTransferError
     from mvpa.clfs.transerror import TransferError
     
     import time
     s = NFoldSplitter()
-    d = normalFeatureDataset(perlabel=500, nfeatures=2000, nchunks=4)
+    nfeatures =10000
+    d = normalFeatureDataset(perlabel=100, nfeatures=nfeatures, nchunks=10, 
+                             means=[N.random.randn(nfeatures), N.random.randn(nfeatures)], snr=10./nfeatures)
     
-    cvNormal = CrossValidatedTransferError(TransferError(SVM()), s)
     
-    csvm = CachedSVM()    
+    cvNormal = CrossValidatedTransferError(TransferError(SVM(C=0.1)), s)
+    
+    csvm = CachedSVM(C=0.1)    
+    csvm.gamma = .001
     cvCached = CrossValidatedTransferError(TransferError(csvm), s)
     
     t1 = time.time()
     cd = csvm.cache(d)
     (cd1, cd2) = s(cd).next()
     t2 = time.time()
-    cvCached(cd)
+    cachederr=cvCached(cd)
     t3 = time.time()
     
     t4 = time.time()
-    cvNormal(d)
+    normerr = cvNormal(d)
     t5 = time.time()
     
-    print 'Kernel cache: %f s'%(t2-t1)
-    print 'Cached CV: %f s'%(t3-t2)
-    print 'Normal CV: %f s'%(t5-t4)
-
+    print 'Kernel cache: %fs'%(t2-t1)
+    print 'Cached CV: %fs, err %i%%'%(t3-t2, cachederr*100)
+    print 'Normal CV: %fs, err %i%%'%(t5-t4, normerr*100)
+    
+    ## Errors with psel currently... runs but not selecting minimum??
+    #from mvpa.clfs.parameter_selector import ParameterSelection
+    #crbf = CachedRbfSVM()
+    #ParameterSelection(crbf, ('C', 'gamma'), s, manipulateClassifier=True)
+    #cd = crbf.cache(d)
+    #crbf.train(cd)
+    #from pylab import show
+    #show()
+    #print crbf._psel.best
     #C=1
     #dim=7
     #from mvpa.misc.data_generators import dumbFeatureBinaryDataset
@@ -240,11 +356,14 @@ if __name__ == '__main__':
     #data = d.samples.astype(float)
     #symdata=N.dot(data, data.T)
     
-    #f = _tosg(data)
+    #from shogun.Kernel import LinearKernel
+    #from shogun.Classifier import LibSVM
+    #C=0.1
+    #f = _tosg(d.samples)
     #lk = LinearKernel(f, f)
     #kernel=CustomKernel()
-    #kernel.set_full_kernel_matrix_from_full(symdata)
-    #labels=Labels(lab)
+    #kernel.set_full_kernel_matrix_from_full(lk.get_kernel_matrix())
+    #labels=Labels((2*d.labels-1).astype(float))
     #lsvm=LibSVM(C, lk, labels)
     #lsvm.train()
     #svm=LibSVM(C, kernel, labels)
