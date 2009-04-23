@@ -8,7 +8,6 @@ Useful ie for any precalculated kernel, for model selection, etc
 WIP
 """
 
-
 import numpy as N
 from mvpa.datasets import Dataset
 from mvpa.clfs.sg.svm import SVM, _tosg, _setdebug
