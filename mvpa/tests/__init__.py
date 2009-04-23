@@ -56,6 +56,7 @@ def collectTestSuites():
         'test_svm',
         'test_plr',
         'test_smlr',
+        'test_customkernels',
         # Various algorithms
         'test_svdmapper',
         'test_samplegroupmapper',
