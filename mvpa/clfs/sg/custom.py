@@ -15,6 +15,10 @@ from shogun.Kernel import CustomKernel
 from shogun.Features import Labels
 import operator
 
+from mvpa.base import warning
+if __debug__:
+    from mvpa.base import debug
+    
 class CachedSVM(SVM):
     """A classifier which can cache the kernel matrix to enable fast training,
     retraining, cross-validation, etc
@@ -26,16 +30,30 @@ class CachedSVM(SVM):
     
     Beware using default (kernel) parameters, like C=0, because when the Classifier
     calls _getDefault(Something) it may send the cached index instead of the 
-    real data!!
+    real data!!  _getDefaultC is overridden in this class because it depends on 
+    the norm of the data.  _getDefaultGamma doesn't depend on the data (just the
+    number of labels) so it doesn't need to be overridden here, but if other
+    defaults are added, they should be overriden in this class.
     """
     def __init__(self, *args, **kwargs):
         SVM.__init__(self, *args, **kwargs)
         self.__kernel = CustomKernel()
     def assertCachedData(self, samples):
-        try:
-            assert True
-        except AssertionError:
-            raise RuntimeError('Cached classifier running on non-cached data')
+        if isinstance(samples, Dataset):
+            self.assertCachedData(samples.samples)
+        else:
+            #try:
+            assert samples.dtype==int
+            try:
+                assert samples.shape[1]==1
+            except IndexError:
+                assert False # Shape is 1d!
+            try:
+                assert all(N.logical_and(samples>=0, samples < self.__cached_kernel.shape[0]))
+            except AttributeError:
+                assert False # Doesn't have cached kernel
+            #except AssertionError:
+                #raise AssertionError('Cached classifier running on non-cached data')
     def __cacheLHS(self, lhs):
         """Grabs lhs from the kernel matrix and caches it"""
         self.__cached_lhs = self.__cached_kernel.take(lhs.ravel(), axis=0)
@@ -51,29 +69,41 @@ class CachedSVM(SVM):
         lhs, rhs must be (Nx1) samples representing cached data via indeces
         If not specified, rhs=lhs (square kernel matrix)
         """
+        if isinstance(lhs, Dataset):
+            lhs=lhs.samples
         if rhs is None:
             rhs = lhs
+        if isinstance(rhs, Dataset):
+            rhs=rhs.samples
         return self.__cached_kernel.take(lhs.ravel(), axis=0).take(rhs.ravel(), axis=1)
     def cacheMultiple(self, *dsets):
         """Caches multiple datasets simultaneously, returning a list with cached
-        items corresponding to the inputs"""
+        items corresponding to the inputs
+        
+        This can be used to predict new (uncached) data without retraining if the
+        first dataset is that which it was trained on, as it will update the lhs
+        with those indeces.  Retraining will overwrite the lhs, so don't worry
+        about it if this is not your intended behavior
+        """
         def asdata(d):
             if isinstance(d, Dataset):
-                return d.samples, d.nfeatures
+                return d.samples, d.nsamples
             return d, d.shape[0]
         def ascache(c, d):
             if isinstance(d, Dataset):
                 dout = d.selectFeatures([0])
                 dout.setSamplesDType(int)
-                dout.samples = N.arange(dout.nsamples).reshape((dout.nsamples, 1))
+                dout.samples = c
             else:
-                dout=N.arange(d.shape[0]).reshape((d.shape[0], 1))
+                dout=c
             return dout
         alld = map(asdata, dsets)
         pured = [d[0] for d in alld]
         puren = N.asarray([d[1] for d in alld])
         allc = self.cache(N.concatenate(pured))
-        return map(ascache, N.split(allc, puren.cumsum()[:-1]), dsets)
+        dout = map(ascache, N.split(allc, puren.cumsum()[:-1]), dsets)
+        self.__cacheLHS(dout[0].samples)
+        return dout
         
     def cache(self, dset):
         """Generates a kernel for the dataset
@@ -232,6 +262,20 @@ class CachedSVM(SVM):
         self.values = values
 
         return predictions
+    
+    
+
+    def _getDefaultC(self, data):
+        #Overriden to not depend on data, since it may not be cached
+        try:
+                self.assertCachedData(data)
+                data = N.sqrt(self.__getCachedMatrix(data).diagonal())
+                data = data.reshape((data.size, 1))
+                return SVM._getDefaultC(self, data)
+        except AssertionError:
+            warning("Asking for default C on non-cached data.  Assigning 1.0")
+            return 1.0
+
 
 
 class CachedRbfSVM(CachedSVM):
@@ -295,7 +339,7 @@ class CachedRbfSVM(CachedSVM):
         # Have to override default which checks for known parameters.  maybe unify api at some point in future
         value = 1.0 / len(dataset.uniquelabels)
         if __debug__:
-            #debug("SVM", "Default Gamma is computed to be %f" % value) # have to find this module and import it
+            debug("SVM", "Default Gamma is computed to be %f" % value) # have to find this module and import it
             pass
         return value
 

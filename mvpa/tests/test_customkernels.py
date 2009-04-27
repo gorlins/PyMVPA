@@ -43,12 +43,30 @@ class CustomKernelTest(unittest.TestCase):
         except Exception:
             self.fail(msg='Problem setting classifier (kernel) parameters')
     
+        #def testAssertCached(self):
+        try:
+            self.sg_csvm.assertCachedData(self.dset)
+        except AssertionError:
+            pass #failUnlessRaises not working for me...
+        except Exception:
+            self.fail(msg='Problem detecting non-cached data')
+        #self.failUnlessRaises(Exception, self.sg_csvm.assertCachedData, self.dset.samples)
+        
         #def testKernelCache(self):
         try:
             self.cached_linear = self.sg_csvm.cache(self.dset)
             self.cached_rbf = self.sg_crbf.cache(self.dset)
         except Exception:
             self.fail(msg='Problem caching data')
+        try:
+            self.sg_csvm.assertCachedData(self.cached_linear)
+        except AssertionError:
+            self.fail('Problem asserting correctly cached data')
+            
+        # Handle default C (if data is cached)
+        cnormal = self.sg_svm._getDefaultC(self.dset.samples)
+        ccached = self.sg_csvm._getDefaultC(self.cached_linear.samples)
+        self.failUnless(cnormal==ccached, msg='Problem calculating C from cached data')
         
         #def testTraining(self):
         try:
@@ -81,6 +99,13 @@ class CustomKernelTest(unittest.TestCase):
         self.sg_rbf.train(self.dset)
         self.failUnless((self.sg_crbf._CachedSVM__cached_kernel == self.sg_rbf._SVM__kernel.get_kernel_matrix()).all(),
                         msg='CachedRbfSVM did not update gamma properly')
+        
+        #def testRecacheClassify(self):
+        (d1, d2) = self.sg_crbf.cacheMultiple(self.dset, self.dset)
+        self.sg_crbf.predict(d2.samples)
+        self.sg_rbf.predict(self.dset.samples)
+        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-6).all(),
+                        msg='CachedRbfSVM failed to predict new cached values properly')
 
 
 def suite():
