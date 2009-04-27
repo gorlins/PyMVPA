@@ -202,15 +202,17 @@ class ParameterSelection(object):
         # Creates figure
         if self._plot:
             import pylab
+            shouldTurnOff = not pylab.isinteractive()
+            pylab.ion()
             px = params[0]
             if self._plot2d:
                 py = params[1]
-            shouldTurnOff = not pylab.isinteractive()
-            pylab.ion()
-            #pylab.hold(False)
+            #shouldTurnOff = not pylab.isinteractive()
+            #pylab.ion()
+            ##pylab.hold(False)
             
             pylab.subplot(self._nrows, self._ncols, self._n)
-            pylab.ioff()
+            #pylab.ioff()
             if self._plot2d:
                 if self._log[px] and not self._log[py]:
                     pylab.semilogx()
@@ -353,13 +355,15 @@ class ParameterSelection(object):
             self.worst = max(self.worst, err.max())
         self.time=time()-t0
         if self._plot:
+            pylab.draw()
             if self._plot2d:
                 pylab.axhline(getattr(self._clf, py), color='k')
             else:
                 pylab.axhline(errs[(getattr(self._clf,px),)], color='k')
             pylab.axvline(getattr(self._clf, px), color='k')
             pylab.draw()
-            pylab.ioff()
+            if shouldTurnOff:
+                pylab.ioff()
             
             
 def _grid(argtup):
