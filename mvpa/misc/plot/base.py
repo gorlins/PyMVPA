@@ -203,7 +203,67 @@ def plotSamplesDistance(dataset, sortbyattr=None):
     P.imshow(ed)
     P.colorbar()
 
+def plotDecisionBoundary2D(dset, clf, res=50, vals=[-1,0,1], dataCallback=None):
+    """Plots a scatter of a classifier's decision boundary and data points
+    
+    Assumes data is 2d (no way to visualize otherwise!!)
+    
+    :Parameters:
+      dset: a dataset (i.e. the trained data, or any novel data)
+      clf: a trained clf
+      res: Number of points in each direction to evaluate
+        Points are between axis limits, which are set automatically by matplotlib
+        Higher number will yield smoother decision lines but come at the cost of
+        O^2 classifying time/memory
+      vals: Where to draw the contour lines
+      dataCallback: Optional callable object to preprocess the new data points
+        Classified points of the form samples = dataCallback(xysamples)
+        Ie this can be a function to normalize them, or cache them (eg, a CachedSVM)
+    """
+    try:
+        assert dset.nfeatures == 2
+    except AssertionError:
+        RuntimeError('Can only plot a decision boundary in 2d')
+    f = P.figure()
+    a = f.add_subplot(1,1,1)
+    vmin = min(dset.uniquelabels)
+    vmax = max(dset.uniquelabels)
+    cmap = P.cm.RdYlGn
+    for l in dset.uniquelabels:
+        s = dset.selectSamples((dset.labels==l).nonzero()[0])
+        c = [cmap((l-vmin)/float(vmax-vmin))]*s.nsamples
+        a.scatter(s.samples[:,0], s.samples[:,1], label='%s'%l, 
+                  c=c, zorder=10+(l-vmin))
+    (xmin, xmax) = a.get_xlim()
+    (ymin, ymax) = a.get_ylim()
+    extent = (xmin, xmax, ymin, ymax)
+    (x,y) = N.mgrid[xmin:xmax:N.complex(0, res), ymin:ymax:N.complex(0,res)]
+    news = N.vstack((x.ravel(), y.ravel())).T
+    import operator
+    if operator.isCallable(dataCallback):
+        news = dataCallback(news)
+    clf.predict(news)
+    linestyles=[]
+    for v in vals:
+        if v == 0:
+            linestyles.append('solid')
+        else:
+            linestyles.append('dashed')
+    a.imshow(N.flipud(clf.values.reshape(x.shape).T),zorder=1, aspect='auto', interpolation='bilinear', 
+               cmap=cmap, vmin=-3, vmax=3, extent=extent, alpha=1)# extends map beyond -1,1 for aesthetics
+    #vals=N.asarray(vals)
+    
+    CS = a.contour(x, y, clf.values.reshape(x.shape), vals, zorder=6,
+                   linestyles=linestyles, extent=extent, colors='k')
+    #cmap=cmap, vmin=-1, vmax=1, extent=extent)
 
+    #a.clabel(CS, zorder=1200)
+
+    P.legend(shadow=True)
+    # Reset data lims
+    #a.set_xlim(xmin, xmax)
+    #a.set_ylim(ymin, ymax)
+    pass
 def plotBars(data, labels=None, title=None, ylim=None, ylabel=None,
                width=0.2, offset=0.2, color='0.6', distance=1.0,
                yerr='ste', **kwargs):

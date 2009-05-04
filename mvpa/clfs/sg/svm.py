@@ -305,7 +305,7 @@ class SVM(_SVM):
                                               *kargs)
 
             if externals.exists('sg >= 0.6.4'):
-                 kernel.set_normalizer(shogun.Kernel.IdentityKernelNormalizer())
+                kernel.set_normalizer(shogun.Kernel.IdentityKernelNormalizer())
 
             newkernel = True
             self.kernel_params.reset()  # mark them as not-changed

@@ -28,8 +28,8 @@ from scipy.ndimage import gaussian_filter
 from mvpa.clfs.transerror import TransferError
 from mvpa.algorithms.cvtranserror import CrossValidatedTransferError
 
-#from scipy.optimize import brute, fmin
 
+#from scipy.optimize import brute, fmin
 class ParameterSelection(object):
     """Runs a grid search algorithm on a classifier and dataset"""
     def configureSubplots(self, nrows, ncols):
@@ -38,7 +38,7 @@ class ParameterSelection(object):
         self._ncols=ncols
         self._n=0
     def __init__(self, classifier, params, splitter, scales = None, defaults=None, 
-                 cv=None, te=None,
+                 cv=None, te=None, priorWeight=.1,
                  log=True, factors = 2., iterations=2, plot=True, nrows=1, ncols=1, 
                  manipulateClassifier=False):
         """Inits a ParameterSelector to do grid evaluation on a data cross-fold
@@ -71,6 +71,11 @@ class ParameterSelection(object):
           scales: array (or tuple of such) defining the range in which to 
           evaluate the grid
           
+          priorWeight: A prior is assigned during error selection, and this allows
+          scaling.  The prior is the geometric distance (or dist in log space) from 
+          the default parameter, scaled to [0 errorMax-errorMin]/current_iteration,
+          and added to the error.  It can be further weighed here (ie set 0 -> no prior)
+          
           log: indicates whether search (and plot) is done in logspace.  
           can be a tuple.
           
@@ -102,6 +107,7 @@ class ParameterSelection(object):
             cv = CrossValidatedTransferError(te, splitter)
 
         self._psel = cv
+        self._priorWeight=priorWeight
         #self._psel.states.enable('confusion')
         #self._psel.states.enable('training_confusion')
         self._clf = classifier
@@ -126,7 +132,7 @@ class ParameterSelection(object):
                 else:
                     self._scales[param]=scales
             else:
-                self._scales[param]=N.arange(-16., 17., 2., dtype='double')
+                self._scales[param]=N.arange(-20., 21., 2., dtype=float)
                 
             # Default (initial) values
             if not defaults is None:
@@ -156,6 +162,7 @@ class ParameterSelection(object):
             makePsel(classifier, self)
     def __call__(self, dset, title=''):
         self.select(dset, title=title)
+
     def select(self, dset, title=''):
         """Runs the parameter selection on a given mvpa dataset, internally setting 
         classifier parameters
@@ -196,55 +203,91 @@ class ParameterSelection(object):
             self.time = 0
             return
                 
-        errs = {}
+        self._errs = errs = {}
         self.worst = 0.
         
         # Creates figure
         if self._plot:
             import pylab
-            shouldTurnOff = not pylab.isinteractive()
-            pylab.ion()
+            self._colormap = pylab.cm.jet
+            from matplotlib.collections import RegularPolyCollection
+            scatterargs={'edgecolors':'none', 'marker':'o'}#,'cmap':pylab.cm.Paired, 'vmin':0, 'vmax':1}
+            cRGB = 1-N.asarray([[1.,1.,1.]])
+            #shouldTurnOff = not pylab.isinteractive()
+            #pylab.ion()
             px = params[0]
             if self._plot2d:
                 py = params[1]
-            #shouldTurnOff = not pylab.isinteractive()
-            #pylab.ion()
-            ##pylab.hold(False)
             
-            pylab.subplot(self._nrows, self._ncols, self._n)
-            #pylab.ioff()
+            self.__axes = pylab.subplot(self._nrows, self._ncols, self._n)
+            axes = self.__axes
+            axes._autoscaleon=True
+            #if shouldTurnOff:
+                #pylab.ioff()
+                
             if self._plot2d:
                 if self._log[px] and not self._log[py]:
-                    pylab.semilogx()
+                    axes.semilogx()
                 elif self._log[py] and not self._log[px]:
-                    pylab.semilogy()
+                    axes.semilogy()
                 elif self._log[px] and self._log[py]:
-                    pylab.loglog()
+                    axes.loglog()
                 else:
                     pass#pylab.Figure()
                 pylab.ylabel(py)
             else:
                 if self._log[px]:
-                    pylab.semilogx()
+                    axes.semilogx()
                 else:
                     pass
                 pylab.ylabel('CV Error')
             
             pylab.xlabel(px)
             pylab.title(title)
-            pylab.hold(True)
             init=True
-            sc = pylab.scatter([.5], [.5], [0.], 
-                               c=[1.], cmap=pylab.cm.Paired, vmin=0, vmax=1, edgecolor='None', marker='s')
             xarray = []
             yarray = []
             counter=0
+            self.__scatteroffsets = []
+            self.__facecolors=[]
+            self.__collection = RegularPolyCollection(8, sizes=(50,), rotation=N.pi/8,
+                                                      facecolors=self.__facecolors,
+                                                      edgecolors='none',
+                                                      offsets=self.__scatteroffsets,
+                                                      transOffset=axes.transData
+                                                      )
+            #axes.add_collection(collection)
             pylab.draw()
      
 
+        ###        
         # Runs the optimization
+        ###
+        
+        # trying to use scipy opt, not yet working
+        #self._errs={}
+        self._dset = dset
+        #from scipy.optimize import fmin, brute
+        #if self._plot:
+            #callback = self._plotX
+        #else:
+            #callback = None
+        #origx = self._pToX([origins[p] for p in self._params])
+        #optx = fmin_bfgs(self._evalP, origx, callback=callback)
+        #self.best = min(self._errs.values())
+        #self.worst = max(self._errs.values())
+        
+        # Brute force (custom gridding)
         err = N.zeros(tuple([len(s) for s in scales.itervalues()]))
-        for i in range(self._iter):
+        prior = err.copy()
+        originp = []
+        for p in params:
+            if self._log[p]:
+                originp.append(N.log(origins[p]))
+            else:
+                originp.append(origins[p])
+        originp=N.asarray(originp).reshape([len(params)]+[1]*len(params))
+        for iteration in range(self._iter):
             # Build grids
             grids = {}
             for p in params:
@@ -252,87 +295,29 @@ class ParameterSelection(object):
                     grids[p] = origins[p]*2.**(scales[p]+offsets[p])
                 else:
                     grids[p] = scales[p]
-                    
-            pgrid = _grid(tuple([g for g in grids.values()]))
-            for (i, pvals) in enumerate(pgrid):
-                for (ii,p) in enumerate(params):
-                    setattr(self._clf, p, pvals[ii])
-                    
-                # Grabs or calculates the error at this pvals
-                if errs.has_key(pvals):
-                    err.ravel()[i] = errs[pvals]
-                else:
-                    # Calculates error e
-                    e = self._psel(dset)
-                    # Uses product of training and testing errors to ensure good parameters!
-                    #e = 1-(1-0*self._psel.training_confusion.error)*(1-self._psel.confusion.error)
-                    
-                    # Stores error e
-                    err.ravel()[i]=e
-                    errs[pvals] = err.ravel()[i]
-                    
-                    # Updates plot
-                    if self._plot:
-                        xarray.append(pvals[0])
-                        if self._plot2d:
-                            yarray.append(pvals[1])
-                            sc.set_offsets(N.concatenate((sc._offsets,[pvals])))
-                        else:
-                            yarray.append(errs[pvals])
-                            sc.set_offsets(N.concatenate((sc._offsets, [[pvals[0], errs[pvals]]])))
-                        
-                        sc._sizes = N.concatenate((sc._sizes,N.maximum([100.*errs[pvals]**2], 10)))
-                        sc.set_array(N.concatenate((sc.get_array(),[errs[pvals]]), axis=0))
-                    
-                        # Updates axes
-                        minx = min(xarray)
-                        maxx = max(xarray)
-                        miny = min(yarray)
-                        maxy = max(yarray)
-                        
-                        if self._log[px]:
-                            minx*=.5
-                            maxx*=2.
-                        else:
-                            pad = (maxx-minx)/20.
-                            minx-=pad
-                            maxx+=pad
-                        if self._plot2d and self._log[py]:
-                            miny*=.5
-                            maxy*=2.
-                        else:
-                            pad = (maxy-miny)/20.
-                            
-                            miny-=pad
-                            maxy+=pad
-                        if not self._plot2d:
-                            miny = 0.
-                            maxy = 1.
-                        corners = (minx, miny), (maxx, maxy)
-                        sc.axes.update_datalim(corners)
-                        sc.axes.autoscale_view()
-                                                    
-                # Limits scatter drawing to once per column, for speed
-                if self._plot:
-                    counter+=1
-                    if self._plot2d:
-                        n = len(grids[py])
-                    else:
-                        n = len(grids[px])
-                    if counter%n == 0:
-                        #pylab.draw()
-                        if init:
-                            init=False
-                            #pylab.colorbar()
+            pind = N.indices([grids[p].size for p in params])
+            pgrid=pind.copy().astype(float)
+            for (i,p) in enumerate(params):
+                pgrid[i] = grids[p][pind[i]]
+                
+            # Runs the actual selection in map
+            paramvec = zip(*[p.ravel() for p in pgrid])
+            err = N.asarray(map(self._evalP, paramvec)).reshape(pgrid[0].shape)
+            priorgrid = pgrid.copy()
+            for (i,p) in enumerate(params):
+                if self._log[p]:
+                    priorgrid[i] = N.log(priorgrid[i])
+            prior = N.sqrt(N.power(priorgrid-originp, 2).sum(axis=0))
             
-            mins = err==err.min()
-            if sum(mins.ravel()) == 1:
-                eid = err.argmin()
+            errscale = N.max(err.max()-err.min(), .01)
+            moderr = err+self._priorWeight*errscale*(prior-prior.min())/(prior.max()-prior.min())/(iteration+1)
+            mins = moderr==moderr.min()
+            if mins.sum() == 1:
+                eid = moderr.argmin()
             else:
-                #g = scipy.ndimage.morphological_gradient(err, size=[3]*err.ndim)
                 sigma=1
-                while sum(mins.ravel()) > 1 and sigma<5:
-                    g = gaussian_filter(err, sigma,cval=1., mode='constant')
+                while mins.sum() > 1 and sigma<5:
+                    g = gaussian_filter(moderr, sigma,cval=1., mode='constant')
                     mins = N.where(mins, g, g.max())==g.min()
                     sigma+=1
                 eid = N.where(mins, g, g.max()).argmin()
@@ -341,7 +326,7 @@ class ParameterSelection(object):
             
             # Set best parameters, update offsets, rescales
             for (i, p) in enumerate(params):
-                setattr(self._clf, p, pgrid[eid][i])
+                setattr(self._clf, p, pgrid[i].ravel()[eid]) # Sets to best!!
                 if self._log[p]:
                     # Recenter scales on best point
                     offsets[p]+=scales[p][eidunravel[i]]
@@ -351,21 +336,75 @@ class ParameterSelection(object):
                     
                     # Rescale
                     scales[p]/=self._factors[p] 
-               
+            if self._plot:
+                self.plotPoints(paramvec, [self._errs[p] for p in paramvec])
+                pylab.draw()
             self.worst = max(self.worst, err.max())
+        
         self.time=time()-t0
         if self._plot:
             pylab.draw()
             if self._plot2d:
+                pylab.axhline(origins[py], color='k', linestyle='dotted')
                 pylab.axhline(getattr(self._clf, py), color='k')
             else:
                 pylab.axhline(errs[(getattr(self._clf,px),)], color='k')
+            pylab.axvline(origins[px], color='k', linestyle='dotted')
             pylab.axvline(getattr(self._clf, px), color='k')
             pylab.draw()
-            if shouldTurnOff:
-                pylab.ioff()
-            
-            
+        
+        self._dset = None# dont want to hold onto it
+    def _plotX(self, x):
+        p = self._xToP(x)
+        err = self._errs[p]
+        xx = p[0]
+        if self._plot2d:
+            yy = p[1]
+        else:
+            yy = err
+        self.plotPoint(xx,yy,err)
+    def _pToX(self, p):
+        x = []
+        for (i,param) in enumerate(self._params):
+            if self._log[param]:
+                x.append(N.log(p[i]))
+            else:
+                x.append(p[i])
+        return tuple(x)
+    def _xToP(self, x):
+        P = []
+        for (i,p) in enumerate(self._params):
+            if self._log[p]:
+                P.append(N.exp(x[i]))
+            else:
+                P.append(x[i])
+        return tuple(P)
+    def plotPoints(self, plist, errlist):
+        if self._plot2d:
+            y = [p[1] for p in plist]
+        else:
+            y = errlist
+        x = [p[0] for p in plist]
+        self.__scatteroffsets.extend(zip(x,y))
+        self.__collection.set_offsets(self.__scatteroffsets)
+        # Directly applying color is faster than letting matplotlib handle colormaps (??)
+        color = [self._colormap(1-e) for e in errlist]
+        self.__facecolors.extend(color)
+        self.__collection.set_facecolor(self.__facecolors)
+        if len(self.__scatteroffsets)==len(plist):
+            self.__axes.add_collection(self.__collection)
+        self.__axes.update_datalim(self.__scatteroffsets)
+        self.__axes.autoscale_view()
+    def _evalP(self, p, plotImmediately=False):
+        #p = self._xToP(x)
+        if not p in self._errs:
+            for (pp, param) in zip(p, self._params):
+                setattr(self._clf, param, pp)
+            self._errs[p] = self._psel(self._dset)
+            if plotImmediately and self._plot:
+                self.plotPoint([p], [self._errs[p]])
+        return self._errs[p]
+        
 def _grid(argtup):
     """Returns a list of tuples containing every perumutation in 
     the tuple(args1, args2...) passed in
@@ -384,8 +423,10 @@ def makePsel(clf, psel):
     """Helper function modifies an existing classifier to automatically run
     parameter selection every time it's trained
     
+    Perhaps should wrap into ProxyClassifier instead?
     WIP
     """
+    # Perhaps this should be wrapped into a class of its own, passing getattr etc to self.__clf
     if not hasattr(clf, '_rawtrain'):#Prevents recursive wrapping
         clf._psel=psel
         clf._rawtrain = clf.train
@@ -397,7 +438,7 @@ def makePsel(clf, psel):
                 self._psel(dataset)
                 self.__selecting=False
             return self._rawtrain(dataset, *args, **kwargs)
-        clf.train=clf._train.__class__(train, clf)
+        clf.train=clf._train.__class__(train, clf) # create as instancemethod
         def selection_summary(self):
             """Returns a string summarizing the last selection step"""
             s = '    --  parameter selection: %d%% to %d%% in %d seconds' %(100*(1.-self._psel.worst),
@@ -407,16 +448,26 @@ def makePsel(clf, psel):
         clf.selection_summary=clf._train.__class__(selection_summary, clf)
     
 if __name__ == '__main__':
-    from mvpa.clfs.svm import RbfCSVMC
-    from mvpa.misc.data_generators import normalFeatureDataset
-    from mvpa.datasets.splitters import NFoldSplitter
+    # Example/test usage
+    from mvpa.clfs.svm import RbfCSVMC, SVM
+    from mvpa.clfs.sg.custom import CachedSVM, CachedRbfSVM
+    from mvpa.misc.data_generators import normalFeatureDataset, dumbFeatureBinaryDataset
+    from mvpa.datasets.splitters import NFoldSplitter, HalfSplitter
     import pylab
     
-    clf = RbfCSVMC()
-    dset = normalFeatureDataset(nfeatures=2, means=[[0,1], [1,0]])
-    
-    psel = ParameterSelection(clf, ('C', 'gamma'), NFoldSplitter(), manipulateClassifier=True)
-    clf.train(dset)
+    clf =  CachedRbfSVM()
+    dset = normalFeatureDataset(perlabel=100, nchunks=2, nfeatures=2, 
+                                means=[[-0.5,0.5], [.5,-.5]], snr=10.0)
+    #dset = dumbFeatureBinaryDataset()
+    cdset = clf.cache(dset)
+    from mvpa.misc.plot import plotDecisionBoundary2D
+    #pylab.ion()
+    psel = ParameterSelection(clf, ('gamma', 'C'), HalfSplitter(), iterations=2, plot=True,manipulateClassifier=True)
+    clf.train(cdset)
+    def cacheme(newsamples):
+        (cd, cs) = clf.cacheMultiple(dset, newsamples)
+        return cs
+    plotDecisionBoundary2D(dset, clf, dataCallback=cacheme)
     print clf.selection_summary()
     pylab.show()
     pass

@@ -128,7 +128,7 @@ class SMLR(Classifier):
 
         # pylint friendly initializations
         self.__ulabels = None
-        """Unigue labels from the training set."""
+        """Unique labels from the training set."""
         self.__weights_all = None
         """Contains all weights including bias values"""
         self.__weights = None

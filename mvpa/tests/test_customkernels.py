@@ -88,9 +88,9 @@ class CustomKernelTest(unittest.TestCase):
                         msg='CachedRbfSVM did not calculate the kernel matrix properly')
         
         #def testAlphaIdentities(self):
-        self.failUnless((self.sg_csvm._CachedSVM__svm.get_alphas() == self.sg_svm._SVM__svm.get_alphas()).all(),
+        self.failUnless((self.sg_csvm._SVM__svm.get_alphas() == self.sg_svm._SVM__svm.get_alphas()).all(),
                         msg='CachedSVM did not calculate the support vectors properly')
-        self.failUnless((self.sg_crbf._CachedSVM__svm.get_alphas() == self.sg_rbf._SVM__svm.get_alphas()).all(),
+        self.failUnless((self.sg_crbf._SVM__svm.get_alphas() == self.sg_rbf._SVM__svm.get_alphas()).all(),
                         msg='CachedRbfSVM did not calculate the support vectors properly')
         
         #def testChangeGamma(self):
@@ -101,17 +101,36 @@ class CustomKernelTest(unittest.TestCase):
                         msg='CachedRbfSVM did not update gamma properly')
         
         #def testRecacheClassify(self):
+        (d1, d2) = self.sg_csvm.cacheMultiple(self.dset, self.dset)
+        self.sg_csvm.predict(d2.samples)
+        self.sg_svm.predict(self.dset.samples)
+        self.failUnless((N.abs(self.sg_csvm.values - self.sg_svm.values)<1e-8).all(),
+                        msg='CachedSVM failed to predict new cached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
+
+        
         (d1, d2) = self.sg_crbf.cacheMultiple(self.dset, self.dset)
         self.sg_crbf.predict(d2.samples)
         self.sg_rbf.predict(self.dset.samples)
-        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-6).all(),
-                        msg='CachedRbfSVM failed to predict new cached values properly')
+        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-8).all(),
+                        msg='CachedRbfSVM failed to predict new cached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
+
+        # def testUncachedTestData(self):
+        td = self.sg_csvm.cacheNewLhsKernel(self.dset, self.dset)
+        self.sg_csvm.predict(td.samples)
+        self.failUnless((N.abs(self.sg_csvm.values - self.sg_svm.values)<1e-8).all(),
+                        msg='CachedSVM failed to predict new noncached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
+
+        td = self.sg_crbf.cacheNewLhsKernel(self.dset, self.dset)
+        self.sg_crbf.predict(td.samples)
+        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-8).all(),
+                        msg='CachedRbfSVM failed to predict new noncached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
 
 
 def suite():
     return unittest.makeSuite(CustomKernelTest)
 
-
-if __name__ == '__main__':
+def run():
     import runner
+if __name__ == '__main__':
+    run()
 

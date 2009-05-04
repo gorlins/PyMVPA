@@ -26,32 +26,36 @@ class CachedSVM(SVM):
     Inits like a normal shogun SVM, so you can use any normal kernel or
     implementation.
     
-    However, it takes a special dataset that is created with self.cache(dset)
+    Note that the kernel cache will become invalid should a kernel parameter
+    change (ie gamma), and the data must be recached for the new parameter to 
+    have an effect.  C is not a kernel parameter, so it may be changed freely.
     
-    Beware using default (kernel) parameters, like C=0, because when the Classifier
-    calls _getDefault(Something) it may send the cached index instead of the 
-    real data!!  _getDefaultC is overridden in this class because it depends on 
-    the norm of the data.  _getDefaultGamma doesn't depend on the data (just the
-    number of labels) so it doesn't need to be overridden here, but if other
-    defaults are added, they should be overriden in this class.
+    Subclasses may deal with changing kernel parameters (eg, CachedRbfSVM)
+    
+    These classifiers must run on a special dataset that is created 
+    with cached = self.cache(dset) or (cd1, cd2,...cdn) = self.cacheMultiple(...)
+    
+    Beware using default parameters, like C=-1, because when the Classifier
+    calls _getDefault(Something) it will calculate the parameter on the cached data
+    index, instead of the real data!!  _getDefaultC is overridden in this class 
+    because it depends on the norm of the data.  _getDefaultGamma doesn't depend
+    on the data (just the number of labels) so it doesn't need to be overridden 
+    here, but if other defaults are added, they should be overriden in this class.
     """
-    def __init__(self, *args, **kwargs):
-        SVM.__init__(self, *args, **kwargs)
-        self.__kernel = CustomKernel()
+    #def __init__(self, *args, **kwargs):
+        #SVM.__init__(self, *args, **kwargs)
     def assertCachedData(self, samples):
         if isinstance(samples, Dataset):
-            self.assertCachedData(samples.samples)
+            samples = samples.samples
+            #self.assertCachedData(samples.samples)
         else:
             #try:
             assert samples.dtype==int
             try:
                 assert samples.shape[1]==1
-            except IndexError:
-                assert False # Shape is 1d!
-            try:
                 assert all(N.logical_and(samples>=0, samples < self.__cached_kernel.shape[0]))
-            except AttributeError:
-                assert False # Doesn't have cached kernel
+            except Exception:
+                raise AssertionError('Cached classifier running on non-cached data')# Doesn't have cached kernel
             #except AssertionError:
                 #raise AssertionError('Cached classifier running on non-cached data')
     def __cacheLHS(self, lhs):
@@ -124,22 +128,88 @@ class CachedSVM(SVM):
             raise RuntimeError('Unknown datatype of class %s'%dset.__class__)
             
         # Init kernel
+        #kargs = []
+        #for arg in self._KERNELS[self._kernel_type_literal][1]:
+            #value = self.kernel_params[arg].value
+            ## XXX Unify damn automagic gamma value
+            #if arg == 'gamma' and value == 0.0:
+                #value = self._getDefaultGamma(dset)
+            #kargs += [value]
+            
+        #sgdata = _tosg(samples)
+        self.__cached_kernel = self.calculateFullKernel(dset)#  self._kernel_type(sgdata, sgdata, *kargs).get_kernel_matrix()
+        return dout
+
+    def calculateFullKernel(self, lhs, rhs=None, kernel_type_literal=None):
+        """Calculates the full kernel for any known type,  using self's params"""
+        if kernel_type_literal is None:
+            kernel_type_literal = self._kernel_type_literal
+        if isinstance(lhs, Dataset):
+            lhs = lhs.samples
+        lhs = _tosg(lhs)
+        if rhs is None:
+            rhs = lhs
+        else:            
+            if isinstance(rhs, Dataset):
+                rhs = rhs.samples
+            rhs = _tosg(rhs)
+        
+        # Init kernel
         kargs = []
-        for arg in self._KERNELS[self._kernel_type_literal][1]:
+        for arg in self._KERNELS[kernel_type_literal][1]:
             value = self.kernel_params[arg].value
             # XXX Unify damn automagic gamma value
             if arg == 'gamma' and value == 0.0:
                 value = self._getDefaultGamma(dset)
             kargs += [value]
-            
-        sgdata = _tosg(samples)
-        self.__cached_kernel = self._kernel_type(sgdata, sgdata, *kargs).get_kernel_matrix()
+        return self._KERNELS[kernel_type_literal][0](lhs, rhs, *kargs).get_kernel_matrix()
+    def cacheNewLhsKernel(self, lhs, rhs, kernel_type_literal=None):
+        """Caches the lhs vs rhs matrix, stores in __cached_lhs, returns indexes for dout only
+        
+        useful if lhs is training data (nonindexed) and rhs is new test data
+        """
+        if isinstance(rhs, Dataset):
+            dout = rhs.selectFeatures([0])
+            dout.setSamplesDType(int)
+            dout.samples = N.arange(dout.nsamples).reshape((dout.nsamples, 1))
+        if isinstance(rhs, N.ndarray):
+            dout = N.arange(rhs.shape[0]).reshape((rhs.shape[0], 1))
+        self.__cached_lhs = self.calculateFullKernel(lhs, rhs=rhs, kernel_type_literal=kernel_type_literal)
         return dout
+        
+    def __makeKernelFromFull(self, full, train=False):
+        """Creates a CustomKernel set with self.__cached_kernel
+        if train, also calls IdentityKernelNormalizer (dunno if this does anything,
+        but it's in SVM parent in training)
+        """
+        from mvpa import externals
+        kernel = CustomKernel()
+        
+        kernel.set_full_kernel_matrix_from_full(full)
+        if train and externals.exists('sg >= 0.6.4'):
+            from shogun.Kernel import IdentityKernelNormalizer
+            kernel.set_normalizer(IdentityKernelNormalizer())
+        self._SVM__condition_kernel(kernel)
+        return kernel
     def _train(self, dataset):
+        
+        # Builds the kernel from cached
         self.assertCachedData(dataset.samples)
-        # Sets kernel with cached
-        self.__kernel.set_full_kernel_matrix_from_full(self.__getCachedMatrix(dataset.samples))
+        self._SVM__kernel = self.__makeKernelFromFull(self.__getCachedMatrix(dataset.samples), train=True)
         self.__cacheLHS(dataset.samples)
+        
+        # Set appropriate values so that SVM._train does not recreate kernel
+        self.retrainable = True
+        if self._changedData is None:
+            self._changedData = {}
+        self._changedData['traindata'] = False
+        self._changedData['kernel_params'] = False # Can't use these now
+        self._SVM__svm = None # Forces super to create new svm
+        
+        SVM._train(self, dataset) # Super _train
+        self.retrainable = False
+    """#Copied from SVM, not needed if above works
+        # Sets kernel with cached
         
         ul=None
         if 'regression' in self._clf_internals:
@@ -193,32 +263,32 @@ class CachedSVM(SVM):
 
         if self._svm_impl in ['libsvr', 'svrlight']:
             # for regressions constructor a bit different
-            self.__svm = svm_impl_class(Cs[0], self.params.epsilon, self.__kernel, labels)
+            self._SVM__svm = svm_impl_class(Cs[0], self.params.epsilon, self._SVM__kernel, labels)
         elif self._svm_impl in ['krr']:
-            self.__svm = svm_impl_class(self.params.tau, self.__kernel, labels)
+            self._SVM__svm = svm_impl_class(self.params.tau, self._SVM__kernel, labels)
         else:
-            self.__svm = svm_impl_class(Cs[0], self.__kernel, labels)
-            self.__svm.set_epsilon(self.params.epsilon)
+            self._SVM__svm = svm_impl_class(Cs[0], self._SVM__kernel, labels)
+            self._SVM__svm.set_epsilon(self.params.epsilon)
         if Cs is not None and len(Cs) == 2:
             if __debug__:
                 debug("SG_", "Since multiple Cs are provided: %s, assign them" % Cs)
-            self.__svm.set_C(Cs[0], Cs[1])
+            self._SVM__svm.set_C(Cs[0], Cs[1])
 
         self.params.reset()  # mark them as not-changed
         newsvm = True
-        _setdebug(self.__svm, 'SVM')
+        _setdebug(self._SVM__svm, 'SVM')
         # Set optimization parameters
         if self.params.isKnown('tube_epsilon') and \
-               hasattr(self.__svm, 'set_tube_epsilon'):
-            self.__svm.set_tube_epsilon(self.params.tube_epsilon)
-        self.__svm.parallel.set_num_threads(self.params.num_threads)
+               hasattr(self._SVM__svm, 'set_tube_epsilon'):
+            self._SVM__svm.set_tube_epsilon(self.params.tube_epsilon)
+        self._SVM__svm.parallel.set_num_threads(self.params.num_threads)
         
-        self.__svm.train()
+        self._SVM__svm.train()
         self._trained_dataset = dataset.copy()
 
         # Report on training
         if self.states.isEnabled('training_confusion'):
-            trained_labels = self.__svm.classify().get_labels()
+            trained_labels = self._SVM__svm.classify().get_labels()
         else:
             trained_labels = None
 
@@ -226,42 +296,61 @@ class CachedSVM(SVM):
             self.states.training_confusion = self._summaryClass(
                 targets=dataset.labels,
                 predictions=trained_labels)
-    
+    """
     def _predict(self, samples):
+    
+        # Builds the kernel from cached
         self.assertCachedData(samples)
-        self.__kernel.set_full_kernel_matrix_from_full(self.__getCachedRHS(samples))
-        self._SVM__condition_kernel(self.__kernel)
-        self.__svm.set_kernel(self.__kernel)
-        values_ = self.__svm.classify()
-        if values_ is None:
-            raise RuntimeError, "We got empty list of values from %s" % self
-
-        values = values_.get_labels()
-        if ('regression' in self._clf_internals):
-            predictions = values
-        else:
-            # local bindings
-            _labels_dict = self._labels_dict
-            _labels_dict_rev = self._labels_dict_rev
-
-            if len(_labels_dict) == 2:
-                predictions = 1.0 - 2*N.signbit(values)
-            else:
-                predictions = values
-
-            # assure that we have the same type
-            label_type = type(_labels_dict.values()[0])
-
-            # remap labels back adjusting their type
-            predictions = [_labels_dict_rev[label_type(x)]
-                           for x in predictions]
-
+        self._SVM__kernel_test = self.__makeKernelFromFull(self.__getCachedRHS(samples))
         
-
-        # store state variable
-        self.values = values
-
+        # Set appropriate values so that SVM._train does not recreate kernel
+        self.retrainable = True
+        if self._changedData is None:
+            self._changedData = {}
+        self._changedData['traindata'] = False
+        self._changedData['kernel_params'] = False # Can't use these now
+        self._changedData['testdata'] = False
+        
+        predictions = SVM._predict(self, samples)
+        self.retrainable = False
         return predictions
+        
+    """ # Copied/modified from SVM._predict, not needed if above works
+    self.assertCachedData(samples)
+    self._SVM__kernel.set_full_kernel_matrix_from_full(self.__getCachedRHS(samples))
+    self._SVM__condition_kernel(self._SVM__kernel)
+    self._SVM__svm.set_kernel(self._SVM__kernel)
+    values_ = self._SVM__svm.classify()
+    if values_ is None:
+        raise RuntimeError, "We got empty list of values from %s" % self
+
+    values = values_.get_labels()
+    if ('regression' in self._clf_internals):
+        predictions = values
+    else:
+        # local bindings
+        _labels_dict = self._labels_dict
+        _labels_dict_rev = self._labels_dict_rev
+
+        if len(_labels_dict) == 2:
+            predictions = 1.0 - 2*N.signbit(values)
+        else:
+            predictions = values
+
+        # assure that we have the same type
+        label_type = type(_labels_dict.values()[0])
+
+        # remap labels back adjusting their type
+        predictions = [_labels_dict_rev[label_type(x)]
+                       for x in predictions]
+
+    
+
+    # store state variable
+    self.values = values
+
+    return predictions
+    """
     
     
 
@@ -269,9 +358,9 @@ class CachedSVM(SVM):
         #Overriden to not depend on data, since it may not be cached
         try:
                 self.assertCachedData(data)
-                data = N.sqrt(self.__getCachedMatrix(data).diagonal())
-                data = data.reshape((data.size, 1))
-                return SVM._getDefaultC(self, data)
+                d = N.sqrt(self.__getCachedMatrix(data).diagonal())
+                d = d.reshape((d.size, 1))
+                return SVM._getDefaultC(self, d)
         except AssertionError:
             warning("Asking for default C on non-cached data.  Assigning 1.0")
             return 1.0
@@ -302,27 +391,34 @@ class CachedRbfSVM(CachedSVM):
     NB: The kernel matrix is stored twice (once for the linear distance, once
     for the Rbf), so beware with huge sample sizes.
     """
+    _KNOWN_KERNEL_PARAMS = ['gamma']
     def __init__(self, kernel_type='rbf', **kwargs):
         if not kernel_type == 'rbf':
             raise RuntimeError('CachedRbfSVM must have kernel type ''rbf'', not ''%s'''%kernel_type)
         CachedSVM.__init__(self, kernel_type='linear', **kwargs)
-        self.gamma=1.
+        #self.gamma=1.
     def cache(self, d):
         dout = CachedSVM.cache(self, d)
-        self.__linear = self.__linearToDist(self._CachedSVM__cached_kernel)
+        self.__explinear = -self.__linearToDist(self._CachedSVM__cached_kernel)
         self.__updateCache()
         return dout
+    
+    def cacheNewLhsKernel(self, lhs, rhs=None, kernel_type_literal=None):
+        # Overrides because we need the rbf here, since we can't calculate the distance
+        #between points from linear product without calculating whole kernel matrix
+        return CachedSVM.cacheNewLhsKernel(self, lhs, rhs, kernel_type_literal='rbf')
+        
     def __updateCache(self):
         """Creates the Rbf kernel from the linear distance"""
         try:
-            self._CachedSVM__cached_kernel = self.__distToRbf(self.__linear, self.gamma)
+            self._CachedSVM__cached_kernel = N.exp(self.__explinear/self.gamma)#self.__distToRbf(self.__linear, self.gamma)
         except AttributeError: # in case kernel not calculated yet
             pass
         
     @staticmethod
     def __linearToDist(k):
         """Convert a dot product kernel matrix to squared Euclidean distance"""
-        return N.diag(k).reshape((1, k.shape[1])) - 2*k+ N.diag(k).reshape((k.shape[0], 1))
+        return N.diag(k).reshape((1, k.shape[1])) - 2*k + N.diag(k).reshape((k.shape[0], 1))
     
     @staticmethod
     def __distToRbf(k, g):
@@ -330,10 +426,15 @@ class CachedRbfSVM(CachedSVM):
         
     def __setattr__(self, attr, value):
         """Automagically adjust kernel for new value of gamma, otherwise set normally"""
-        CachedSVM.__setattr__(self, attr, value)
-        if attr=='gamma':
+        if attr=='gamma' and value != self.gamma:
+            CachedSVM.__setattr__(self, attr, value)
             self.__updateCache()
-            
+        else:
+            CachedSVM.__setattr__(self, attr, value)
+    def _getDefaultC(self, dataset):
+        #algorithm always returns 1.0 since diagonal is always 1.0 in Rbf
+        # this also prevents some errors
+        return 1.0
     def _getDefaultGamma(self, dataset):
         
         # Have to override default which checks for known parameters.  maybe unify api at some point in future
@@ -383,6 +484,8 @@ if __name__ == '__main__':
     print 'Cached CV: %fs, err %i%%'%(t3-t2, cachederr*100)
     print 'Normal CV: %fs, err %i%%'%(t5-t4, normerr*100)
     
+    import mvpa.tests.test_customkernels
+    mvpa.tests.test_customkernels.run()
     ## Errors with psel currently... runs but not selecting minimum??
     #from mvpa.clfs.parameter_selector import ParameterSelection
     #crbf = CachedRbfSVM()
