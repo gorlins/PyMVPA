@@ -60,6 +60,9 @@ def dumbFeatureBinaryDataset():
 
     return Dataset(samples=data, labels=regs)
 
+def dumbNormalFeatureBinaryDataset(perlabel=50, nchunks=5, snr=1.0):
+    return normalFeatureDataset(perlabel=perlabel, nfeatures=2, nchunks=nchunks, snr=snr,
+                                nlabels=2, means=[[.5, -.5],[-.5, .5]])
 
 
 def normalFeatureDataset(perlabel=50, nlabels=2, nfeatures=4, nchunks=5,
