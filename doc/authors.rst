@@ -22,9 +22,10 @@ valuable advice, code or documentation to PyMVPA:
 * `James M. Hughes`_, Dartmouth College, USA
 * `Ingo Fründ`_, University of Magdeburg, Germany
 * `James Kyle`_, UCLA, USA
-* Scott Gorlins, MIT, USA
+* `Scott Gorlin`_, MIT, USA
 
 .. _Greg Detre: http://www.princeton.edu/~gdetre/
 .. _James M. Hughes: http://www.cs.dartmouth.edu/~hughes/index.html
 .. _Ingo Fründ: http://www-e.uni-magdeburg.de/fruend/
 .. _James Kyle: http://www.ccn.ucla.edu/users/jkyle
+.. _Scott Gorlin: http://web.mit.edu/gorlins/www/
