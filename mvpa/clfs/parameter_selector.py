@@ -37,10 +37,10 @@ class ParameterSelection(object):
         self._nrows=nrows
         self._ncols=ncols
         self._n=0
-    def __init__(self, classifier, params, splitter, scales = None, defaults=None, 
-                 cv=None, te=None, priorWeight=.1,
-                 log=True, factors = 2., iterations=2, plot=True, nrows=1, ncols=1, 
-                 manipulateClassifier=False):
+    def __init__(self, classifier, params, splitter, scales = None, 
+                 defaults=None, cv=None, te=None, priorWeight=.1,
+                 factors = 2., iterations=2, plot=True, nrows=1, ncols=1, 
+                 manipulateClassifier=False, log=True):
         """Inits a ParameterSelector to do grid evaluation on a data cross-fold
         to find the best classifier parameters
         
@@ -164,8 +164,8 @@ class ParameterSelection(object):
         self.select(dset, title=title)
 
     def select(self, dset, title=''):
-        """Runs the parameter selection on a given mvpa dataset, internally setting 
-        classifier parameters
+        """Runs the parameter selection on a given mvpa dataset, internally 
+        setting classifier parameters
         
         if plotting, you can title the figure with the keyword title
         """
@@ -185,7 +185,7 @@ class ParameterSelection(object):
                 except AttributeError:
                     try:
                         origins[p] = getattr(self._clf, '_getDefault'+pupper)(dset)
-                    except Error:
+                    except Exception:
                         origins[p] = 1.
             else:
                 origins[p] = 1.
@@ -414,7 +414,7 @@ def _grid(argtup):
     tup = '(' 
     gen = ''
     for i in range(len(argtup)):
-        tup+='p%d,'%i
+        tup += 'p%d,'%i
         gen += ' for p%d in argtup[%d]'%(i, i)
     tup += ')'
     return eval('['+tup+gen+']')
@@ -448,16 +448,16 @@ def makePsel(clf, psel):
         clf.selection_summary=clf._train.__class__(selection_summary, clf)
     
 if __name__ == '__main__':
-    # Example/test usage
+    # Example/test usage, since unittest is not written yet
     from mvpa.clfs.svm import RbfCSVMC, SVM
     from mvpa.clfs.sg.custom import CachedSVM, CachedRbfSVM
-    from mvpa.misc.data_generators import normalFeatureDataset, dumbFeatureBinaryDataset
+    from mvpa.misc.data_generators import normalFeatureDataset, dumbNormalFeatureBinaryDataset
     from mvpa.datasets.splitters import NFoldSplitter, HalfSplitter
     import pylab
     
     clf =  CachedRbfSVM()
-    dset = normalFeatureDataset(perlabel=100, nchunks=2, nfeatures=2, 
-                                means=[[-0.5,0.5], [.5,-.5]], snr=10.0)
+    dset = dumbNormalFeatureBinaryDataset(perlabel=100, nchunks=2, snr=6)
+    
     #dset = dumbFeatureBinaryDataset()
     cdset = clf.cache(dset)
     from mvpa.misc.plot import plotDecisionBoundary2D

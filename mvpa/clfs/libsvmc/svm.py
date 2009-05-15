@@ -104,7 +104,7 @@ class SVM(_SVM):
             if svm_impl is None:
                 svm_impl = 'C_SVC'
                 if __debug__:
-                      debug('SVM', 'Assign C_SVC "by default"')
+                    debug('SVM', 'Assign C_SVC "by default"')
         kwargs['svm_impl'] = svm_impl
 
         # init base class

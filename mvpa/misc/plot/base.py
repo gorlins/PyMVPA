@@ -224,6 +224,8 @@ def plotDecisionBoundary2D(dset, clf, res=50, vals=[-1,0,1], dataCallback=None):
         assert dset.nfeatures == 2
     except AssertionError:
         RuntimeError('Can only plot a decision boundary in 2d')
+    von = clf.states.isEnabled('values')
+    clf.states.enable('values')
     f = P.figure()
     a = f.add_subplot(1,1,1)
     vmin = min(dset.uniquelabels)
@@ -259,10 +261,12 @@ def plotDecisionBoundary2D(dset, clf, res=50, vals=[-1,0,1], dataCallback=None):
 
     #a.clabel(CS, zorder=1200)
 
-    P.legend(shadow=True)
+    P.legend()
     # Reset data lims
     #a.set_xlim(xmin, xmax)
     #a.set_ylim(ymin, ymax)
+    if not von:
+        clf.states.disable('values')
     pass
 def plotBars(data, labels=None, title=None, ylim=None, ylabel=None,
                width=0.2, offset=0.2, color='0.6', distance=1.0,

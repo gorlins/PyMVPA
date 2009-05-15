@@ -573,16 +573,22 @@ class ConfusionMatrix(SummaryStatistics):
 
         #
         # ROC computation if available
-        ROC = ROCCurve(labels=labels, sets=self.sets)
-        aucs = ROC.aucs
-        if len(aucs)>0:
-            stats['AUC'] = aucs
-            if len(aucs) != Nlabels:
-                raise RuntimeError, \
-                      "We must got a AUC per label. Got %d instead of %d" % \
-                      (len(aucs), Nlabels)
-            self.ROC = ROC
-        else:
+        ### Problem computing ROC if not all labels are in test dataset 
+        ### (occurs occaisionally when testing is partitioned), which raises a ValueError
+        ### in ROCCurve._compute
+        try:# 
+            ROC = ROCCurve(labels=labels, sets=self.sets)
+            aucs = ROC.aucs
+            if len(aucs)>0:
+                stats['AUC'] = aucs
+                if len(aucs) != Nlabels:
+                    raise RuntimeError, \
+                          "We must got a AUC per label. Got %d instead of %d" % \
+                          (len(aucs), Nlabels)
+                self.ROC = ROC
+            else:
+                raise ValueError('Bogus ROC')
+        except ValueError:
             # we don't want to provide ROC if it is bogus
             stats['AUC'] = [N.nan] * Nlabels
             self.ROC = None
