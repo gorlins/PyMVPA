@@ -1,6 +1,11 @@
-#!/usr/bin/python
-#coding:utf-8
-
+# emacs: -*- mode: python; py-indent-offset: 4; indent-tabs-mode: nil -*-
+# vi: set ft=python sts=4 ts=4 sw=4 et:
+### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
+#
+#   See COPYING file distributed along with the PyMVPA package for the
+#   copyright and license terms.
+#
+### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 """This module runs brute force parameter selection on any given classifier.
 
 A great deal of work is needed to make it optimal for retrainable classifiers,

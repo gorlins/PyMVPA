@@ -1,5 +1,3 @@
-#!/usr/bin/python
-#coding:utf-8
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 #
 #   Copyright (c) 2008 Scott Gorlin <gorlins@mit.edu>
@@ -9,7 +7,9 @@
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 from ctypes import *
 
-"""This module implements Plexon.h in python, allowing the user to read plx files"""
+"""This module implements Plexon.h in python, 
+allowing the user to read plx files
+"""
 
 # Wraps Structure for some cool functionality
 class StructureWrapper(Structure):
