@@ -28,14 +28,7 @@ def __version_to_tuple(v):
     Tuple of integers constructed by splitting at '.'.
     """
     if isinstance(v, basestring):
-        def sToi(s):
-            try:
-                return int(s)
-            except ValueError, v: # Developement versions raise errors!!
-                if s == 'dev':
-                    return -1
-                raise ValueError('%s is not a valid version component'%s)
-        v = tuple([sToi(x) for x in v.split('.')])
+        v = tuple([int(x) for x in v.split('.') if not x.startswith('dev')])
     elif isinstance(v, tuple) or isinstance(v, list):
         # assure tuple
         v = tuple(v)
@@ -299,6 +292,7 @@ _KNOWN = {'libsvm':'import mvpa.clfs.libsvmc._svm as __; x=__.convert2SVMNode',
           'rpy': "import rpy as __",
           'lars': "import rpy; rpy.r.library('lars')",
           'elasticnet': "import rpy; rpy.r.library('elasticnet')",
+          'glmnet': "import rpy; rpy.r.library('glmnet')",
           'matplotlib': "__check_matplotlib()",
           'pylab': "__check_pylab()",
           'pylab plottable': "__check_pylab_plottable()",
