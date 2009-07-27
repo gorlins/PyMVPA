@@ -432,10 +432,13 @@ def makePsel(clf, psel):
     WIP
     """
     # Perhaps this should be wrapped into a class of its own, passing getattr etc to self.__clf
+    if hasattr(clf, '_psel'):
+        Warning('Overwritting _psel attribute... hopefully this is intentional')
+    
+    clf._psel=psel # Allows changing psel instance
+    clf.__selecting = False
     if not hasattr(clf, '_rawtrain'):#Prevents recursive wrapping
-        clf._psel=psel
         clf._rawtrain = clf.train
-        clf.__selecting = False
         def train(self, dataset, *args, **kwargs):
             """Runs parameter selection, then trains the classifier as normal"""
             if not self.__selecting:
@@ -444,13 +447,13 @@ def makePsel(clf, psel):
                 self.__selecting=False
             return self._rawtrain(dataset, *args, **kwargs)
         clf.train=clf._train.__class__(train, clf) # create as instancemethod
-        def selection_summary(self):
-            """Returns a string summarizing the last selection step"""
-            s = '    --  parameter selection: %d%% to %d%% in %d seconds' %(100*(1.-self._psel.worst),
-                                                                            100*(1-self._psel.best),
-                                                                            self._psel.time)
-            return s
-        clf.selection_summary=clf._train.__class__(selection_summary, clf)
+    def selection_summary(self):
+        """Returns a string summarizing the last selection step"""
+        s = '    --  parameter selection: %d%% to %d%% in %d seconds' %(100*(1.-self._psel.worst),
+                                                                        100*(1-self._psel.best),
+                                                                        self._psel.time)
+        return s
+    clf.selection_summary=clf._train.__class__(selection_summary, clf)
     
 if __name__ == '__main__':
     # Example/test usage, since unittest is not written yet
