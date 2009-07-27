@@ -59,6 +59,7 @@ def collectTestSuites():
         'test_customkernels',
         # Various algorithms
         'test_svdmapper',
+        'test_procrust',
         'test_samplegroupmapper',
         'test_transformers',
         'test_transerror',
