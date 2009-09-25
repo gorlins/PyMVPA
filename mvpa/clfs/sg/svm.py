@@ -113,6 +113,8 @@ class SVM(_SVM):
     if externals.exists('shogun', raiseException=True):
         _KERNELS = { "linear": (shogun.Kernel.LinearKernel,
                                ('scale',), LinearSVMWeights),
+                     "poly":   (shogun.Kernel.PolyKernel,
+                                ('degree','coef0'), None),
                      "rbf" :   (shogun.Kernel.GaussianKernel,
                                ('gamma',), None),
                      "rbfshift": (shogun.Kernel.GaussianShiftKernel,
@@ -170,6 +172,12 @@ class SVM(_SVM):
                       "large-scale SVM problems"),
             "gnpp" : (shogun.Classifier.GNPPSVM, ('C',), ('binary',),
                       "Generalized Nearest Point Problem SVM"),
+            # XXX CMCSVM implements One-V-Rest nicely, but it does NOT include
+            # a bias term?? Use a polynomial kernel with degree 1 to get around
+            # this --SG
+            "mcsvm" : (shogun.Classifier.MCSVM, ('C',),
+                       ('multiclass', 'binary'), 
+                       "LIBSVM's C-SVM with ONE-VS-REST multiclass handling"),
 
             ## TODO: Needs sparse features...
             # "svmlin" : (shogun.Classifier.SVMLin, ''),
@@ -611,12 +619,19 @@ class SVM(_SVM):
 
     def __get_implementation(self, ul):
         if 'regression' in self._clf_internals or len(ul) == 2:
+            if len(ul)==2 and self._svm_impl == 'mcsvm':
+                raise RuntimeError,  \
+                      "Shogun: Implementation %s doesn't handle 2-class " \
+                      "data. Got labels %s. Use some other classifier" % \
+                      (self._svm_impl, self.__traindataset.uniquelabels)
             svm_impl_class = SVM._KNOWN_IMPLEMENTATIONS[self._svm_impl][0]
         else:
             if self._svm_impl == 'libsvm':
                 svm_impl_class = shogun.Classifier.LibSVMMultiClass
             elif self._svm_impl == 'gmnp':
                 svm_impl_class = shogun.Classifier.GMNPSVM
+            elif self._svm_impl == 'mcsvm':
+                svm_impl_class = shogun.Classifier.MCSVM
             else:
                 raise RuntimeError, \
                       "Shogun: Implementation %s doesn't handle multiclass " \

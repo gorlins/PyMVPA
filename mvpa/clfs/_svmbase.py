@@ -72,7 +72,9 @@ class _SVM(Classifier):
         'cache_size': Parameter(100,
                   doc='Size of the kernel cache, specified in megabytes'),
         'coef0': Parameter(0.5,
-                  doc='Offset coefficient in polynomial and sigmoid kernels'),
+                  doc='Offset coefficient in polynomial and sigmoid kernels '
+                      '(NB: In Shogun, this is interpreted as a boolean; 1 is '
+                      'used internally if this value evaluates as True)'),
         'degree': Parameter(3, doc='Degree of polynomial kernel'),
             # init the parameter interface
         'tube_epsilon': Parameter(0.01,
