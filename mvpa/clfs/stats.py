@@ -188,7 +188,8 @@ class MCNullDist(NullDist):
     dist_samples = StateVariable(enabled=False,
                                  doc='Samples obtained for each permutation')
 
-    def __init__(self, dist_class=Nonparametric, permutations=100, **kwargs):
+    def __init__(self, dist_class=Nonparametric, permutations=100,
+                 perchunk=False, **kwargs):
         """Initialize Monte-Carlo Permutation Null-hypothesis testing
 
         :Parameters:
@@ -200,6 +201,8 @@ class MCNullDist(NullDist):
           permutations: int
             This many permutations of label will be performed to
             determine the distribution under the null hypothesis.
+          perchunk: bool
+            If True, only permutes labels within each chunk
         """
         NullDist.__init__(self, **kwargs)
 
@@ -209,6 +212,8 @@ class MCNullDist(NullDist):
         self.__permutations = permutations
         """Number of permutations to compute the estimate the null
         distribution."""
+        
+        self.__perchunk = perchunk
 
 
 
@@ -244,14 +249,17 @@ class MCNullDist(NullDist):
             # classifier, hence the number of permutations to estimate the
             # null-distribution of transfer errors can be reduced dramatically
             # when the *right* permutations (the ones that matter) are done.
-            wdata.permuteLabels(True, perchunk=False)
+            #
+            # XXX Adding perchunk helps this issue, esp. if there's only 1 
+            # sample/label/chunk
+            wdata.permuteLabels(True, perchunk=self.__perchunk)
 
             # compute and store the measure of this permutation
             # assume it has `TransferError` interface
             dist_samples.append(measure(*measure_args))
 
         # restore original labels
-        wdata.permuteLabels(False, perchunk=False)
+        wdata.permuteLabels(False, perchunk=self.__perchunk)
 
         # store samples
         self.dist_samples = dist_samples = N.asarray(dist_samples)
