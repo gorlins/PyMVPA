@@ -249,9 +249,10 @@ def plotDecisionBoundary2D(dset, clf, res=50, vals=[-1,0,1],
     # Create grid to evaluate, predict it
     (x,y) = N.mgrid[xmin:xmax:N.complex(0, res), ymin:ymax:N.complex(0,res)]
     news = N.vstack((x.ravel(), y.ravel())).T
-    import operator
-    if operator.isCallable(dataCallback):
+    try:
         news = dataCallback(news)
+    except TypeError: # Not a callable object
+        pass
     clf.predict(news)
     
     # Contour and show predictions
@@ -268,8 +269,10 @@ def plotDecisionBoundary2D(dset, clf, res=50, vals=[-1,0,1],
         vals = (clf.trained_labels[:-1]+clf.trained_labels[1:])/2.
         linestyles=['solid']*len(vals)
         
-    a.imshow(N.flipud(clf.values.reshape(x.shape).T),zorder=1, aspect='auto', interpolation='bilinear', 
-               cmap=cmap, vmin=vmin, vmax=vmax, extent=extent, alpha=1)# extends map beyond -1,1 for aesthetics
+    a.imshow(N.flipud(clf.values.reshape(x.shape).T),zorder=1, aspect='auto',
+             interpolation='bilinear', alpha=1, cmap=cmap, 
+             vmin=vmin, vmax=vmax,
+             extent=extent,)# extends map beyond -1,1 for aesthetics
 
     CS = a.contour(x, y, clf.values.reshape(x.shape), vals, zorder=6,
                    linestyles=linestyles, extent=extent, colors='k')
