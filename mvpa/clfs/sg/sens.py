@@ -57,7 +57,13 @@ class LinearSVMWeights(Sensitivity):
         # XXX Hm... it might make sense to unify access functions
         # naming across our swig libsvm wrapper and sg access
         # functions for svm
+        
         svm = self.clf.svm
+        kernel = svm.get_kernel()
+        
+        if not 'linear' in kernel.get_name().lower():
+            raise RuntimeWarning('Calculating sensitivities on a nonlinear kernel!!\nResults are likely invalid')
+        
         if isinstance(svm, shogun.Classifier.MultiClassSVM):
             sens = []
             for i in xrange(svm.get_num_svms()):
@@ -66,3 +72,16 @@ class LinearSVMWeights(Sensitivity):
             sens = self.__sg_helper(svm)
         return N.asarray(sens)
 
+    
+    
+class LinearMCSVMWeights(LinearSVMWeights):
+    """`Sensitivity` that reports the weights of a linear SVM trained
+    on a given `Dataset` with more than one class.
+    """
+    
+    def __init__(self, clf, combiner=None, **kwargs):
+        from mvpa.misc.transformers import FirstAxisSumOfAbs
+        if combiner is None:
+            combiner = FirstAxisSumOfAbs
+        LinearSVMWeights.__init__(self, clf, combiner=combiner,
+                                  **kwargs)

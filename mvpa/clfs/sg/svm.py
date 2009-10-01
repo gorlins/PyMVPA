@@ -176,7 +176,7 @@ class SVM(_SVM):
             # a bias term?? Use a polynomial kernel with degree 1 to get around
             # this --SG
             "mcsvm" : (shogun.Classifier.MCSVM, ('C',),
-                       ('multiclass', 'binary'), 
+                       ('multiclass',), 
                        "LIBSVM's C-SVM with ONE-VS-REST multiclass handling"),
 
             ## TODO: Needs sparse features...
