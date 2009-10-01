@@ -50,6 +50,17 @@ def FirstAxisMean(x):
     """Mean computed along the first axis."""
     return N.mean(x, axis=0)
 
+
+def FirstAxisSumOfAbs(x):
+    """Sum of absolute values along the 2nd axis
+
+    Use cases:
+     - to combine multiple sensitivities to get sense about
+       what features are most influential
+    """
+    return N.abs(x).sum(axis=0)
+
+
 def FirstAxisSumNotZero(x):
     """Sum computed over first axis of whether the values are not
     equal to zero."""
