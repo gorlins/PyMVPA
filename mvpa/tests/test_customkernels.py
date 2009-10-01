@@ -6,8 +6,8 @@ counterparts
 
 My first unittest ever, so could use some work
 Todo:
-* learn to use unittests to sweep through various (cached) classifiers (currently
-they're all in same tests)
+* learn to use unittests to sweep through various (cached) classifiers
+ (currently they're all in same tests)
 * break up framework into multiple smaller tests instead of one big one
 """
 shogun = externals.exists('shogun')
@@ -19,7 +19,8 @@ class CustomKernelTest(unittest.TestCase):
     def testCustomKernels(self):
         self.dset = datasets['dumb2']
         
-        self.failUnless(shogun, msg='Custom (cached) kernel classifiers currently require Shogun')
+        self.failUnless(shogun, msg='Custom (cached) kernel classifiers ' + 
+                        'require Shogun')
         
         try:
             self.sg_csvm = shogun_custom.CachedSVM()
@@ -50,7 +51,6 @@ class CustomKernelTest(unittest.TestCase):
             pass #failUnlessRaises not working for me...
         except Exception:
             self.fail(msg='Problem detecting non-cached data')
-        #self.failUnlessRaises(Exception, self.sg_csvm.assertCachedData, self.dset.samples)
         
         #def testKernelCache(self):
         try:
@@ -60,13 +60,14 @@ class CustomKernelTest(unittest.TestCase):
             self.fail(msg='Problem caching data')
         try:
             self.sg_csvm.assertCachedData(self.cached_linear)
+            self.sg_crbf.assertCachedData(self.cached_rbf)
         except AssertionError:
             self.fail('Problem asserting correctly cached data')
             
         # Handle default C (if data is cached)
         cnormal = self.sg_svm._getDefaultC(self.dset.samples)
         ccached = self.sg_csvm._getDefaultC(self.cached_linear.samples)
-        self.failUnless(cnormal==ccached, msg='Problem calculating C from cached data')
+        self.failUnless(cnormal==ccached, msg='Problem calculating C')
         
         #def testTraining(self):
         try:
@@ -81,49 +82,50 @@ class CustomKernelTest(unittest.TestCase):
         except Exception:
             self.fail(msg='Problem training standard Shogun classifiers')
         
-        #def testKernelIdentities(self):
-        self.failUnless((self.sg_csvm._CachedSVM__cached_kernel == self.sg_svm._SVM__kernel.get_kernel_matrix()).all(),
-                        msg='CachedSVM did not calculate the kernel matrix properly')
-        self.failUnless((self.sg_crbf._CachedSVM__cached_kernel == self.sg_rbf._SVM__kernel.get_kernel_matrix()).all(),
-                        msg='CachedRbfSVM did not calculate the kernel matrix properly')
         
         #def testAlphaIdentities(self):
-        self.failUnless((self.sg_csvm._SVM__svm.get_alphas() == self.sg_svm._SVM__svm.get_alphas()).all(),
-                        msg='CachedSVM did not calculate the support vectors properly')
-        self.failUnless((self.sg_crbf._SVM__svm.get_alphas() == self.sg_rbf._SVM__svm.get_alphas()).all(),
-                        msg='CachedRbfSVM did not calculate the support vectors properly')
+        self.failUnless((self.sg_csvm._SVM__svm.get_alphas() == 
+                         self.sg_svm._SVM__svm.get_alphas()).all(),
+                        msg='CachedSVM did not calculate alpha properly')
+        self.failUnless((self.sg_crbf._SVM__svm.get_alphas() ==
+                         self.sg_rbf._SVM__svm.get_alphas()).all(),
+                        msg='CachedRbfSVM did not calculate alpha properly')
         
         #def testChangeGamma(self):
-        self.sg_crbf.gamma = .5 # Automatically updates kernel without recalculating!!
+        self.sg_crbf.gamma = .5 # Updates kernel w/o recalculating :)!!
         self.sg_rbf.gamma=.5
         self.sg_rbf.train(self.dset)
-        self.failUnless((self.sg_crbf._CachedSVM__cached_kernel == self.sg_rbf._SVM__kernel.get_kernel_matrix()).all(),
+        self.failUnless((self.sg_crbf._CachedSVM__cached_kernel == 
+                         self.sg_rbf._SVM__kernel.get_kernel_matrix()).all(),
                         msg='CachedRbfSVM did not update gamma properly')
         
         #def testRecacheClassify(self):
         (d1, d2) = self.sg_csvm.cacheMultiple(self.dset, self.dset)
         self.sg_csvm.predict(d2.samples)
         self.sg_svm.predict(self.dset.samples)
-        self.failUnless((N.abs(self.sg_csvm.values - self.sg_svm.values)<1e-8).all(),
-                        msg='CachedSVM failed to predict new cached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
-
+        self.failUnless((self.sg_csvm.values == self.sg_svm.values).all(),
+                        msg='CachedSVM failed to predict values properly')
         
         (d1, d2) = self.sg_crbf.cacheMultiple(self.dset, self.dset)
         self.sg_crbf.predict(d2.samples)
         self.sg_rbf.predict(self.dset.samples)
-        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-8).all(),
-                        msg='CachedRbfSVM failed to predict new cached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
+        self.failUnless((N.abs(self.sg_crbf.values - 
+                               self.sg_rbf.values)<1e-8).all(),
+                        msg='CachedRbfSVM failed to predict values properly')
+        #On occaision, the diffs test at ~=4e-10 on my computer
 
         # def testUncachedTestData(self):
         td = self.sg_csvm.cacheNewLhsKernel(self.dset, self.dset)
         self.sg_csvm.predict(td.samples)
-        self.failUnless((N.abs(self.sg_csvm.values - self.sg_svm.values)<1e-8).all(),
-                        msg='CachedSVM failed to predict new noncached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
-
+        self.failUnless((self.sg_csvm.values == self.sg_svm.values).all(),
+                        msg='CachedSVM failed to predict values properly')
+        
         td = self.sg_crbf.cacheNewLhsKernel(self.dset, self.dset)
         self.sg_crbf.predict(td.samples)
-        self.failUnless((N.abs(self.sg_crbf.values - self.sg_rbf.values)<1e-8).all(),
-                        msg='CachedRbfSVM failed to predict new noncached values properly')#For some reason, the diffs test at ~=4e-10 on my computer
+        self.failUnless((N.abs(self.sg_crbf.values - 
+                               self.sg_rbf.values)<1e-8).all(),
+                        msg='CachedRbfSVM failed to predict values properly')
+        #For some reason, the diffs test at ~=4e-10 on my computer
 
 
 def suite():
