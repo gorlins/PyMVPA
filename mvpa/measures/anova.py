@@ -96,7 +96,31 @@ class OneWayAnova(FeaturewiseDatasetMeasure):
         #prob = scipy.stats.fprob(dfbn, dfwn, f)
         #return prob
 
+class OneWayAnovaP(OneWayAnova):
+    """Identical to `OneWayAnova` except that it returns P values instead of F
+    values
+    """
+    
+    def _call(self, dataset, labels=None):
+        from scipy.stats import fprob
+        
+        # number of groups
+        if labels is None:
+            labels = dataset.labels
 
+        ul = N.unique(labels)
+
+        na = len(ul)
+        bign = float(dataset.nsamples)
+
+        # degrees of freedom
+        dfbn = na-1
+        dfwn = bign - na
+        
+        f = OneWayAnova._call(self, dataset, labels=labels)
+        return fprob(dfbn, dfwn, f)
+    
+    
 class CompoundOneWayAnova(OneWayAnova):
     """Compound comparisons via univariate ANOVA.
 
