@@ -180,9 +180,10 @@ class SVM(_SVM):
             # XXX CMCSVM implements One-V-Rest nicely, but it does NOT include
             # a bias term?? Use a polynomial kernel with degree 1 to get around
             # this --SG
-            "mcsvm" : (shogun.Classifier.MCSVM, ('C',),
-                       ('multiclass',), 
-                       "LIBSVM's C-SVM with ONE-VS-REST multiclass handling"),
+            # Removed from shogun .91
+            #"mcsvm" : (shogun.Classifier.MCSVM, ('C',),
+                       #('multiclass',), 
+                       #"LIBSVM's C-SVM with ONE-VS-REST multiclass handling"),
 
             ## TODO: Needs sparse features...
             # "svmlin" : (shogun.Classifier.SVMLin, ''),
