@@ -25,70 +25,17 @@ from mvpa.base import warning
 if __debug__:
     from mvpa.base import debug
     
-class CachedSVM(SVM):
-    """A classifier which can cache the kernel matrix to enable fast training,
-    retraining, cross-validation, MC null distribution estimates, etc.
-    
-    The speed benefits of using this class vs a traditional SVM will only be 
-    realized if you train or predict the same data more than once.  The more 
-    you retrain (ie N-fold cross validation, more MC samples) and the slower
-    your kernel is to calculate (many features) the more this class is for you.
-    I.e., this class transforms a normal problem from O(t*P) to O(t) + O(P) for 
-    t trials and P features
-    
-    Inits like a normal shogun SVM, so you can use any normal kernel or
-    implementation.
-    
-    Note that the kernel cache will become invalid should a kernel parameter
-    change (ie gamma), and the data must be recached for the new parameter to 
-    have an effect.  C is not a kernel parameter, so it may be changed freely.
-    
-    Subclasses may deal with changing kernel parameters (eg, CachedRbfSVM) as
-    required for fast parameter selection, etc.
-    
-    These classifiers must run on a special dataset that is created 
-    with cached = self.cache(dset) or (cd1, cd2,...cdn) = self.cacheMultiple(..)
-    
-    Beware using default parameters, like C=-1, because when the Classifier
-    calls _getDefault{Something} it will calculate the parameter on the cached 
-    index, instead of the real data!!  _getDefaultC is overridden in this class 
-    because it depends on the norm of the data.  _getDefaultGamma doesn't depend
-    on the data (just the number of labels) so it doesn't need to be overridden 
-    here, but if other defaults are added, they should be overriden.
-    
-    In terms of memory, this class stores the following matrices:
-    
-      self.__cached_kernel: (N x N) matrix storing ALL the currently cached
-        kernel calculations, including training and testing data
-      self.__cached_lhs: (n x N) matrix containing the last trained n samples
-        against all N cached samples.  This is a COPY of the data.
-        In the case that self.cacheNewLhsKernel is called, this matrix becomes
-        (n x nr) where nr is the number of newly cached samples from the rhs.
-        
-      (This is in addition to the kernel matrices used internally by Shogun)
-        
-    Because of these considerations, this class should be avoided for extremely
-    large N
-    
-    This setup means all data can be cached once up front, and any number of 
-    retraining, CV, label-swapping, etc can reoccur without needing to
-    recalculate the kernel (unless a kernel parameter is changed)
-    
-    DO NOT use this class if your FEATURES will change, ie for Recursive Feature
-    Selection or a searchlight analysis, since you will need to recache the 
-    kernel with each new featureset anyway (unless you need CV/more than one 
-    training per selected feature set, this class will yield no benefit)
-        
-    XXX: it may be possible to do away with __cached_lhs and simply extract the
-    lhs from the full matrix prior to each prediction, but this will prevent
-    things like cacheNewLhsKernel
-    """
-
-    def assertCachedData(self, samples):
+class CachedKernel(object):
+    def __init__(self, clf):
+        self._clf = clf #ugly step here before I completely refactor stuff
+    def assertCachedData(self, samples, rhs=False):
         """Raises an AssertionError if samples are not properly cached indeces
         
         :Parameters:
           samples: cached Dataset or numpy array of cached indeces
+  
+          rhs: checks if samples are valid rhs indeces (for prediction) instead
+            of trained up front
           
         :Returns:
           nothing
@@ -104,8 +51,12 @@ class CachedSVM(SVM):
 
             # Valid indeces
             try:
+                if rhs:
+                    mx = self._cached_lhs.shape[1]
+                else:
+                    mx = self._cached_kernel.shape[0]
                 valid = N.logical_and(samples >= 0,
-                                      samples < self.__cached_kernel.shape[0])
+                                      samples < mx)
             except AttributeError:
                 raise AssertionError()
             assert valid.all()
@@ -113,17 +64,17 @@ class CachedSVM(SVM):
         except AssertionError:
             raise AssertionError('Using non-cached data in a CachedSVM!!')
             
-    def __cacheLHS(self, lhs):
+    def _cacheLHS(self, lhs):
         """Grabs lhs from the kernel matrix and caches it"""
-        self.__cached_lhs = self.__cached_kernel.take(lhs.ravel(), axis=0)
+        self._cached_lhs = self._cached_kernel.take(lhs.ravel(), axis=0)
         
-    def __getCachedRHS(self, rhs):
+    def _getCachedRHS(self, rhs):
         """Similar to __getChachedMatrix, but leaves the LHS intact (maybe
         faster for predicting, though untested)
         """
-        return self.__cached_lhs.take(rhs.ravel(), axis=1)
+        return self._cached_lhs.take(rhs.ravel(), axis=1)
     
-    def __getCachedMatrix(self, lhs, rhs=None):
+    def _getCachedMatrix(self, lhs, rhs=None):
         """Creates a full kernel matrix from the cached data
         
         lhs, rhs must be (Nx1) samples representing cached data via indeces
@@ -135,8 +86,8 @@ class CachedSVM(SVM):
             rhs = lhs
         rhs, rn = self._asdata(rhs)
             
-        return self.__cached_kernel.take(lhs.ravel(), axis=0).take(rhs.ravel(),
-                                                                   axis=1)
+        return self._cached_kernel.take(lhs.ravel(), axis=0).take(rhs.ravel(),
+                                                                  axis=1)
 
     @staticmethod
     def _asdata(d):
@@ -196,7 +147,7 @@ class CachedSVM(SVM):
         puren = N.asarray([d[1] for d in alld])
         allc = self.cache(N.concatenate(pured))
         dout = map(self._ascache, N.split(allc, puren.cumsum()[:-1]), dsets)
-        self.__cacheLHS(dout[0].samples) # Treats first input as LHS
+        self._cacheLHS(dout[0].samples) # Treats first input as LHS
         return dout
         
     def cache(self, dset):
@@ -207,13 +158,14 @@ class CachedSVM(SVM):
         classifier instead of the original dataset
         """
         (samples, n) = self._asdata(dset)            
-        self.__cached_kernel = self.calculateFullKernel(samples)
+        self._cached_kernel = self.calculateFullKernel(samples)
+        self._cached_lhs = self._cached_kernel
         return self._ascache(N.arange(n), dset)
 
     def calculateFullKernel(self, lhs, rhs=None, kernel_type_literal=None):
         """Calculates the full kernel for any known type, using self's params"""
         if kernel_type_literal is None:
-            kernel_type_literal = self._kernel_type_literal
+            kernel_type_literal = self._clf._kernel_type_literal
         lhs, ln = self._asdata(lhs)
         sglhs = _tosg(lhs)
         if rhs is None:
@@ -224,13 +176,13 @@ class CachedSVM(SVM):
         
         # Init kernel
         kargs = []
-        for arg in self._KERNELS[kernel_type_literal][1]:
-            value = self.kernel_params[arg].value
+        for arg in self._clf._KERNELS[kernel_type_literal][1]:
+            value = self._clf.kernel_params[arg].value
             # XXX Unify damn automagic gamma value
             if arg == 'gamma' and value == 0.0:
-                value = self._getDefaultGamma(dset)
+                value = self._clf._getDefaultGamma(dset)
             kargs += [value]
-        kernel = self._KERNELS[kernel_type_literal][0](sglhs, sgrhs, *kargs)
+        kernel = self._clf._KERNELS[kernel_type_literal][0](sglhs, sgrhs, *kargs)
         
         # To be consistent with base SVM class, set normalizer to I
         # XXX: Why?  seems to help in some cases
@@ -274,10 +226,10 @@ class CachedSVM(SVM):
         
         clhs = self.calculateFullKernel(lhsd, rhs=rhsd, 
                                         kernel_type_literal=kernel_type_literal)
-        self.__cached_lhs = clhs
+        self._cached_lhs = clhs
         return rout
         
-    def __makeKernelFromFull(self, full, train=False):
+    def _makeKernelFromFull(self, full, train=False):
         """Creates a CustomKernel set with self.__cached_kernel
         if train, also calls IdentityKernelNormalizer (dunno if this does
         anything, but it's in SVM parent in training)
@@ -289,16 +241,154 @@ class CachedSVM(SVM):
         if train and externals.exists('sg >= 0.6.4'):
             from shogun.Kernel import IdentityKernelNormalizer
             kernel.set_normalizer(IdentityKernelNormalizer())
-        self._SVM__condition_kernel(kernel)
+        self._clf._SVM__condition_kernel(kernel) # from when inside SVM
         return kernel
+    
+class CachedRbfKernel(CachedKernel):
+    def __init__(self, *args, **kwargs):
+        CachedKernel.__init__(self, *args, **kwargs)
+        self._distance = None # holder for cached distance matrix
+        
+    def cache(self, d):
+        """Caches the dataset, here in linear form to faciliate magic gamma
+        changing"""
+        dout = CachedKernel.cache(self, d)
+        self._distance = -self._linearToDist(self._cached_kernel)
+        self._updateCache()
+        return dout
+    
+    def cacheNewLhsKernel(self, lhs, rhs=None, kernel_type_literal=None):
+        """Creates a full kernel matrix from lhs and rhs
+        
+        This is a hack to allow this classifier to predict new data, since it
+        won't normally work without caching the entire dataset
+        
+        Note that automatic gamma updating will not work for this caching method
+        (since the full kernel is ignored here)
+        """
+        # Overrides because we need the rbf here, since we can't calculate the
+        # distance between points from linear product without calculating whole
+        # kernel matrix
+        return CachedKernel.cacheNewLhsKernel(self, lhs, rhs, 
+                                              kernel_type_literal='rbf')
+        
+    def _updateCache(self):
+        """Creates the Rbf kernel from the linear distance kernel"""
+        if not self._distance is None:
+            self._cached_kernel = N.exp(self._distance/self.gamma)
+            
+    @staticmethod
+    def _linearToDist(Kij):
+        """Convert a square dot product kernel matrix to Euclidean distance^2
+        
+        Formula:
+
+        <x,y>=dot(x,y); |x| = sqrt(sum(x^2)); => |x|^2 = <x,x>
+        
+        |x-y|^2 = <x-y,x-y> = |x|^2 - 2<x,y> + |y|^2
+        
+        Therefor for kernel Kij = <xi, xj>, (Dij)^2 = Kii - 2Kij + Kjj
+        """
+        assert len(Kij.shape)==2
+        assert Kij.shape[0] == Kij.shape[1]
+        Kii = N.diag(Kij).reshape((Kij.shape[1], 1))
+        Kjj = Kii.T
+        return Kii - 2*Kij + Kjj
+    
+class CachedClassifier(object):
+    def __init__(self, kernel_class=None):
+        if kernel_class is None:
+            kernel_class = CachedKernel
+        self._ck = kernel_class(self)
+        
+    def assertCachedData(self, samples, rhs=False):
+        self._ck.assertCachedData(samples, rhs=rhs)
+    assertCachedData.__doc__ = CachedKernel.assertCachedData.__doc__
+    
+    def cacheMultiple(self, *dsets):
+        return self._ck.cacheMultiple(*dsets)
+    cacheMultiple.__doc__ = CachedKernel.assertCachedData.__doc__
+        
+    def cache(self, dset):
+        return self._ck.cache(dset)
+    cache.__doc__ = CachedKernel.cache.__doc__
+    
+    def cacheNewLhsKernel(self, lhs, rhs, kernel_type_literal=None):
+        return self._ck.cacheNewLhsKernel(lhs, rhs,
+                                          kernel_type_literal=kernel_type_literal)
+    cacheNewLhsKernel.__doc__ = CachedKernel.cacheNewLhsKernel.__doc__
+       
+class CachedSVM(CachedClassifier, SVM):
+    """A classifier which can cache the kernel matrix to enable fast training,
+    retraining, cross-validation, MC null distribution estimates, etc.
+    
+    The speed benefits of using this class vs a traditional SVM will only be 
+    realized if you train or predict the same data more than once.  The more 
+    you retrain (ie N-fold cross validation, more MC samples) and the slower
+    your kernel is to calculate (many features) the more this class is for you.
+    I.e., this class transforms a normal problem from O(t*P) to O(t) + O(P) for 
+    t trials and P features
+    
+    Inits like a normal shogun SVM, so you can use any normal kernel or
+    implementation.
+    
+    Note that the kernel cache will become invalid should a kernel parameter
+    change (ie gamma), and the data must be recached for the new parameter to 
+    have an effect.  C is not a kernel parameter, so it may be changed freely.
+    
+    Subclasses may deal with changing kernel parameters (eg, CachedRbfSVM) as
+    required for fast parameter selection, etc.
+    
+    These classifiers must run on a special dataset that is created 
+    with cached = self.cache(dset) or (cd1, cd2,...cdn) = self.cacheMultiple(..)
+    
+    Beware using default parameters, like C=-1, because when the Classifier
+    calls _getDefault{Something} it will calculate the parameter on the cached 
+    index, instead of the real data!!  _getDefaultC is overridden in this class 
+    because it depends on the norm of the data.  _getDefaultGamma doesn't depend
+    on the data (just the number of labels) so it doesn't need to be overridden 
+    here, but if other defaults are added, they should be overriden.
+    
+    In terms of memory, this class stores the following matrices:
+    
+      self.__cached_kernel: (N x N) matrix storing ALL the currently cached
+        kernel calculations, including training and testing data
+      self.__cached_lhs: (n x N) matrix containing the last trained n samples
+        against all N cached samples.  This is a COPY of the data.
+        In the case that self.cacheNewLhsKernel is called, this matrix becomes
+        (n x nr) where nr is the number of newly cached samples from the rhs.
+        
+      (This is in addition to the kernel matrices used internally by Shogun)
+        
+    Because of these considerations, this class should be avoided for extremely
+    large N
+    
+    This setup means all data can be cached once up front, and any number of 
+    retraining, CV, label-swapping, etc can reoccur without needing to
+    recalculate the kernel (unless a kernel parameter is changed)
+    
+    DO NOT use this class if your FEATURES will change, ie for Recursive Feature
+    Selection or a searchlight analysis, since you will need to recache the 
+    kernel with each new featureset anyway (unless you need CV/more than one 
+    training per selected feature set, this class will yield no benefit)
+        
+    XXX: it may be possible to do away with __cached_lhs and simply extract the
+    lhs from the full matrix prior to each prediction, but this will prevent
+    things like cacheNewLhsKernel
+    """
+
+    def __init__(self, *args, **kwargs):
+        SVM.__init__(self, *args, **kwargs)
+        CachedClassifier.__init__(self)
+
     
     def _train(self, dataset):
         
         # Builds the kernel from cached
         self.assertCachedData(dataset.samples)
-        m = self.__getCachedMatrix(dataset.samples)
-        self._SVM__kernel = self.__makeKernelFromFull(m, train=True)
-        self.__cacheLHS(dataset.samples)
+        m = self._ck._getCachedMatrix(dataset.samples)
+        self._SVM__kernel = self._ck._makeKernelFromFull(m, train=True)
+        self._ck._cacheLHS(dataset.samples)
         
         # Set appropriate values so that SVM._train does not recreate kernel
         self.retrainable = True
@@ -314,9 +404,9 @@ class CachedSVM(SVM):
     def _predict(self, samples):
     
         # Builds the kernel from cached
-        self.assertCachedData(samples)
-        f = self.__getCachedRHS(samples)
-        self._SVM__kernel_test = self.__makeKernelFromFull(f)
+        self.assertCachedData(samples, rhs=True)
+        f = self._ck._getCachedRHS(samples)
+        self._SVM__kernel_test = self._ck._makeKernelFromFull(f)
         
         # Set appropriate values so that SVM._train does not recreate kernel
         self.retrainable = True
@@ -331,19 +421,25 @@ class CachedSVM(SVM):
         return predictions
     
     
-
     def _getDefaultC(self, data):
         #Overriden to not depend on data, since it may not be cached
         try:
             self.assertCachedData(data)
-            d = N.sqrt(self.__getCachedMatrix(data).diagonal())
+            d = N.sqrt(self._ck._getCachedMatrix(data).diagonal())
             d = d.reshape((d.size, 1))
             return SVM._getDefaultC(self, d)
         except AssertionError:
             warning("Asking for default C on non-cached data.  Assigning 1.0")
             return 1.0
 
-
+class PreservedKernelCachedSVM(CachedSVM):
+    """Acts just like a CachedSVM but shallow copies the kernel, useful when
+    certain other classes clone the classifier but the kernel should be shared
+    """
+    def clone(self):
+        other = CachedSVM.clone(self)
+        other._ck = self._ck
+        return other
 
 class CachedRbfSVM(CachedSVM):
     """A cached SVM with an Rbf kernel
@@ -379,62 +475,19 @@ class CachedRbfSVM(CachedSVM):
             raise RuntimeError(msg)
         # Actually inits as a linear kernel, since we need the distance
         CachedSVM.__init__(self, kernel_type='linear', **kwargs)
-        self.__distance = None # holder for cached distance matrix
+        self._ck = CachedRbfKernel(self)
+        self._ck.gamma=self.gamma
         #self.gamma=1.
         
-    def cache(self, d):
-        """Caches the dataset, here in linear form to faciliate magic gamma
-        changing"""
-        dout = CachedSVM.cache(self, d)
-        self.__distance = -self.__linearToDist(self._CachedSVM__cached_kernel)
-        self.__updateCache()
-        return dout
-    
-    def cacheNewLhsKernel(self, lhs, rhs=None, kernel_type_literal=None):
-        """Creates a full kernel matrix from lhs and rhs
-        
-        This is a hack to allow this classifier to predict new data, since it
-        won't normally work without caching the entire dataset
-        
-        Note that automatic gamma updating will not work for this caching method
-        (since the full kernel is ignored here)
-        """
-        # Overrides because we need the rbf here, since we can't calculate the
-        # distance between points from linear product without calculating whole
-        # kernel matrix
-        return CachedSVM.cacheNewLhsKernel(self, lhs, rhs, 
-                                           kernel_type_literal='rbf')
-        
-    def __updateCache(self):
-        """Creates the Rbf kernel from the linear distance kernel"""
-        if not self.__distance is None:
-            self._CachedSVM__cached_kernel = N.exp(self.__distance/self.gamma)
-            
-    @staticmethod
-    def __linearToDist(Kij):
-        """Convert a square dot product kernel matrix to Euclidean distance^2
-        
-        Formula:
 
-        <x,y>=dot(x,y); |x| = sqrt(sum(x^2)); => |x|^2 = <x,x>
-        
-        |x-y|^2 = <x-y,x-y> = |x|^2 - 2<x,y> + |y|^2
-        
-        Therefor for kernel Kij = <xi, xj>, (Dij)^2 = Kii - 2Kij + Kjj
-        """
-        assert len(Kij.shape)==2
-        assert Kij.shape[0] == Kij.shape[1]
-        Kii = N.diag(Kij).reshape((Kij.shape[1], 1))
-        Kjj = Kii.T
-        return Kii - 2*Kij + Kjj
-    
     def __setattr__(self, attr, value):
         """Automagically adjust kernel for new value of gamma
         otherwise set normally
         """
         CachedSVM.__setattr__(self, attr, value)
         if attr == 'gamma':
-            self.__updateCache()
+            self._ck.gamma = value
+            self._ck._updateCache()
             
     def _getDefaultC(self, dataset):
         """Default C for the Rbf is 1"""

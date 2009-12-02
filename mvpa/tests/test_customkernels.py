@@ -95,7 +95,7 @@ class CustomKernelTest(unittest.TestCase):
         self.sg_crbf.gamma = .5 # Updates kernel w/o recalculating :)!!
         self.sg_rbf.gamma=.5
         self.sg_rbf.train(self.dset)
-        self.failUnless((self.sg_crbf._CachedSVM__cached_kernel == 
+        self.failUnless((self.sg_crbf._ck._cached_kernel == 
                          self.sg_rbf._SVM__kernel.get_kernel_matrix()).all(),
                         msg='CachedRbfSVM did not update gamma properly')
         
