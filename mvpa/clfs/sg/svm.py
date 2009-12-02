@@ -63,8 +63,13 @@ def _setdebug(obj, partname):
     """
     debugname = "SG_%s" % partname.upper()
 
-    switch = {True: (shogun.Kernel.M_DEBUG, 'M_DEBUG', "enable"),
-              False: (shogun.Kernel.M_ERROR, 'M_ERROR', "disable")}
+    try:
+        switch = {True: (shogun.Kernel.M_DEBUG, 'M_DEBUG', "enable"),
+                  False: (shogun.Kernel.M_ERROR, 'M_ERROR', "disable")}
+    except AttributeError:
+        # Renames since Shogun 0.91 :(
+        switch = {True: (shogun.Kernel.MSG_DEBUG, 'MSG_DEBUG', "enable"),
+                  False:(shogun.Kernel.MSG_ERROR, 'MSG_ERROR', "disable")}
 
     key = __debug__ and debugname in debug.active
 
@@ -619,7 +624,7 @@ class SVM(_SVM):
 
     def __get_implementation(self, ul):
         if 'regression' in self._clf_internals or len(ul) == 2:
-            if len(ul)==2 and self._svm_impl == 'mcsvm':
+            if len(ul)==2 and self._svm_impl == 'mklmulti':
                 raise RuntimeError,  \
                       "Shogun: Implementation %s doesn't handle 2-class " \
                       "data. Got labels %s. Use some other classifier" % \
@@ -630,8 +635,8 @@ class SVM(_SVM):
                 svm_impl_class = shogun.Classifier.LibSVMMultiClass
             elif self._svm_impl == 'gmnp':
                 svm_impl_class = shogun.Classifier.GMNPSVM
-            elif self._svm_impl == 'mcsvm':
-                svm_impl_class = shogun.Classifier.MCSVM
+            #elif self._svm_impl == 'mcsvm': # No longer in Shogun
+                #svm_impl_class = shogun.Classifier.MCSVM
             else:
                 raise RuntimeError, \
                       "Shogun: Implementation %s doesn't handle multiclass " \
