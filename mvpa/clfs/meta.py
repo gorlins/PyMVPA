@@ -341,7 +341,40 @@ class PredictionsCombiner(ClassWithCollections):
         raise NotImplementedError
 
 
-
+class MaximalValue(PredictionsCombiner):
+    predictions = StateVariable(enabled=True, doc="Voted predictions")
+    #values = StateVariable(enabled=False, doc="Raw value for chosen prediction")
+    def __call__(self, clfs, dataset):
+        """Finds class with largest predictive value.  Currently assumes Binary
+        Classifiers only for 1-vs-Rest multiclass
+        """
+        
+        if len(clfs)==0:
+            return []
+        vals = []
+        labels = []
+        for clf in clfs:
+            if not clf.states.isEnabled("values"):
+                raise ValueError, "MaximalValue needs classifiers (such as " + \
+                      "%s) with state 'values' enabled" % clf
+            if not isinstance(clf, BinaryClassifier):
+                raise ValueError, "MaximalValue needs BinaryClassifiers"
+            vals.append(clf.values)
+            ps = clf._BinaryClassifier__poslabels
+            if len(ps)>1:
+                raise ValueError, "MaximalValue needs one positive label per "+\
+                      "classifier, ie for 1-vs-Rest Multiclass"
+            labels.extend(ps)
+            
+        vals = N.asarray(vals)
+        inds = vals.argmax(axis=0)
+        labels = N.asarray(labels)
+        self.predictions = labels[inds]
+        #if self.states.isEnabled('values'):
+            #self.values = inds.choose(vals)
+            
+        return self.predictions
+            
 class MaximalVote(PredictionsCombiner):
     """Provides a decision using maximal vote rule"""
 
@@ -586,6 +619,8 @@ class CombinedClassifier(BoostedClassifier):
                             " but combiner doesn't have 'values' active, thus "
                             " .values cannot be provided directly, access .clfs"
                             % self)
+                # At least add in predictions for compatibility
+                self.values = N.asarray(predictions) 
         return predictions
 
 
@@ -707,8 +742,12 @@ class BinaryClassifier(ProxyClassifier):
         If there was just a single label within pos or neg labels then it would
         return not a list but just that single label.
         """
+        if self.states.isEnabled('values'):
+            self._ProxyClassifier__clf.states.enable('values')
         binary_predictions = ProxyClassifier._predict(self, data)
-        self.values = binary_predictions
+        #self.values = binary_predictions # Why??? values should always be raw
+        if self.states.isEnabled('values'):
+            self.values = self._ProxyClassifier__clf.values
         predictions = [ {-1: self.__predictneg,
                          +1: self.__predictpos}[x] for x in binary_predictions]
         self.predictions = predictions
@@ -732,9 +771,24 @@ class MulticlassClassifier(CombinedClassifier):
             classifier based on which multiple classifiers are created
             for multiclass
           bclf_type
-            "1-vs-1" or "1-vs-all", determines the way to generate binary
+            "1-vs-1" or "1-vs-rest", determines the way to generate binary
             classifiers
           """
+        
+        # Some checks on known ways to do multiclass
+        if bclf_type.lower() == "1-vs-1":
+            kwargs['combiner'] = MaximalVote()
+            pass
+        elif bclf_type.lower() == "1-vs-rest": # TODO
+            #raise NotImplementedError
+            kwargs['combiner'] = MaximalValue()
+            pass
+        else:
+            raise ValueError, \
+                  "Unknown type of classifier %s for " % bclf_type + \
+                  "BoostedMulticlassClassifier"
+        self.__bclf_type = bclf_type.lower()
+        
         CombinedClassifier.__init__(self, **kwargs)
         self._regressionIsBogus()
         if not clf is None:
@@ -743,16 +797,7 @@ class MulticlassClassifier(CombinedClassifier):
         self.__clf = clf
         """Store sample instance of basic classifier"""
 
-        # Some checks on known ways to do multiclass
-        if bclf_type == "1-vs-1":
-            pass
-        elif bclf_type == "1-vs-all": # TODO
-            raise NotImplementedError
-        else:
-            raise ValueError, \
-                  "Unknown type of classifier %s for " % bclf_type + \
-                  "BoostedMulticlassClassifier"
-        self.__bclf_type = bclf_type
+        
 
     # XXX fix it up a bit... it seems that MulticlassClassifier should
     # be actually ProxyClassifier and use BoostedClassifier internally
@@ -781,11 +826,22 @@ class MulticlassClassifier(CombinedClassifier):
                 debug("CLFMC", "Created %d binary classifiers for %d labels" %
                       (len(biclfs), len(ulabels)))
 
-            self.clfs = biclfs
 
-        elif self.__bclf_type == "1-vs-all":
-            raise NotImplementedError
 
+        elif self.__bclf_type == "1-vs-rest":
+            #raise NotImplementedError
+            # XXX - why wasn't this implemented?  looks simple enough
+            biclfs = []
+            for i in ulabels:
+                b = BinaryClassifier(self.__clf.clone(),
+                                     poslabels=[i],
+                                     neglabels=[j for j in ulabels if not i==j],
+                                     )
+                biclfs.append(b)
+        else:
+            raise RuntimeError('Undefined bclf type %s'%self.__bclf_type)
+        
+        self.clfs = biclfs
         # perform actual training
         CombinedClassifier._train(self, dataset)
 
