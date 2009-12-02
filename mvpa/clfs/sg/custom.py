@@ -509,3 +509,12 @@ class CachedRbfSVM(CachedSVM):
             
         return value
 
+from mvpa.clfs.meta import MulticlassClassifier
+class CachedMulticlassSVM(CachedClassifier, MulticlassClassifier):
+    def __init__(self, cachedsvm, **kwargs):
+        CachedClassifier.__init__(self)
+        assert isinstance(cachedsvm,PreservedKernelCachedSVM)
+        self._ck = cachedsvm._ck
+        
+        MulticlassClassifier.__init__(self, cachedsvm, **kwargs)
+        
