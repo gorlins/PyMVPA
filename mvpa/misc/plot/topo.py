@@ -141,6 +141,106 @@ def plotHeadTopography(topography, sensorlocations, plotsensors=False,
     return map, head, sensors
 
 
+def plotFlatHeadTopography(topography, sensorlocations, plotsensors=False,
+                       resolution=51, masked=True, plothead=True,
+                       plothead_kwargs=None, **kwargs):
+    """Plot distribution to a head surface, derived from some sensor locations.
+
+    Instead of mapping a sphere, plots only the x and y coordinates
+
+    :Parameters:
+      topography: array
+        A vector of some values corresponding to each sensor.
+      sensorlocations: (nsensors x 3) array
+        3D coordinates of each sensor. The order of the sensors has to match
+        with the `topography` vector.
+      plotsensors: bool
+        If True, sensor will be plotted on their projected coordinates.
+        No sensor are shown otherwise.
+      plothead: bool
+        If True, a head outline is plotted.
+      plothead_kwargs: dict
+        Additional keyword arguments passed to `plotHeadOutline()`.
+      resolution: int
+        Number of surface samples along both x and y-axis.
+      masked: bool
+        If True, all surface sample extending to head outline will be
+        masked.
+      **kwargs:
+        All additional arguments will be passed to `pylab.imshow()`.
+
+
+    :Returns:
+      (map, head, sensors)
+        The corresponding matplotlib objects are returned if plotted, ie.
+        if plothead is set to `False`, `head` will be `None`.
+
+          map
+            The colormap that makes the actual plot, a
+            matplotlib.image.AxesImage instance.
+          head
+            What is returned by `plotHeadOutline()`.
+          sensors
+            The dots marking the electrodes, a matplotlib.lines.Line2d
+            instance.
+    """
+    # give sane defaults
+    if plothead_kwargs is None:
+        plothead_kwargs = {}
+
+    # do fit
+    cx = 0.5*(sensorlocations[:, 0].max() + sensorlocations[:, 0].min())
+    cy = 0.5*(sensorlocations[:, 1].max() + sensorlocations[:, 1].min())
+    r = max(sensorlocations[:, 0].max() - sensorlocations[:, 0].min(),
+            sensorlocations[:, 1].max() - sensorlocations[:, 1].min())/2.
+
+
+    # size of each square
+    ssh = float(r) / resolution         # half-size
+    ss = ssh * 2.0                      # full-size
+
+    # Generate a grid and interpolate using the griddata module
+    x = N.arange(cx - r, cx + r, ss) + ssh
+    y = N.arange(cy - r, cy + r, ss) + ssh
+    x, y = P.meshgrid(x, y)
+
+    # project the sensor locations onto the sphere
+    sphere_center = N.array((cx, cy))
+    sproj = sensorlocations[:, :2] - sphere_center
+    sproj /= r
+
+    # fit topology onto xy projection of sphere
+    topo = griddata(sproj[:, 0], sproj[:, 1],
+            N.ravel(N.array(topography)), x, y, interp='nn')
+
+    # mask values outside the head
+    if masked:
+        notinhead = N.greater_equal((x - cx) ** 2 + (y - cy) ** 2,
+                                    (1.0 * r) ** 2)
+        topo = M.masked_where(notinhead, topo)
+
+    # show surface
+    map = P.imshow(topo, origin="lower", extent=(-r, r, -r, r), **kwargs)
+    P.axis('off')
+
+    if plothead:
+        # plot scaled head outline
+        head = plotHeadOutline(scale=r, shift=(cx/2.0, cy/2.0), **plothead_kwargs)
+    else:
+        head = None
+
+    if plotsensors:
+        # plot projected sensor locations
+
+        # reorder sensors so the ones below plotted first
+        # TODO: please fix with more elegant solution
+        sensors = P.plot(sproj[:, 0] - cx/2.0, sproj[:, 1] - cy/2.0, 'wo')
+    else:
+        sensors = None
+
+    return map, head, sensors
+
+
 def plotHeadOutline(scale=1, shift=(0, 0), color='k', linewidth='5', **kwargs):
     """Plots a simple outline of a head viewed from the top.
 
